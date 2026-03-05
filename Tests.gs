@@ -73,8 +73,12 @@ function test_parseGlobalAddress() {
       expected: { addr1: '456 Reversed Rd', city: 'Beverly Hills', state: 'CA', zip: '90210', country: 'United States', success: true }
     },
     {
+      input: ['Center valley, PA 18034 United States'],
+      expected: { addr1: '', city: 'Center valley', state: 'PA', zip: '18034', country: 'United States', success: true }
+    },
+    {
       input: ['Invalid address block no geo info'],
-      expected: { addr1: 'Invalid address block no geo info', success: false }
+      expected: { addr1: 'Invalid address block no geo info', city: '', state: '', zip: '', success: false }
     }
   ];
 

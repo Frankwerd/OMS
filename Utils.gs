@@ -274,9 +274,13 @@ var OMS_Utils = {
     };
 
     for (let key in countryMap) {
-      if (lastLine === key || lastLine.endsWith(' ' + key)) {
+      if (lastLine === key) {
         d.country = countryMap[key];
         working.pop();
+        break;
+      } else if (lastLine.endsWith(' ' + key)) {
+        d.country = countryMap[key];
+        working[working.length - 1] = working[working.length - 1].slice(0, -(key.length)).trim().replace(/,$/, '').trim();
         break;
       }
     }
@@ -293,8 +297,13 @@ var OMS_Utils = {
     // 1. "City, State Zip" or "City State Zip" (2-letter state)
     let usCaMatch = geo.match(/^(.*?)[,\s]+([A-Z]{2})\s+(\d{5}(?:-\d{4})?|[A-Z]\d[A-Z]\s*\d[A-Z]\d)$/i);
     if (!usCaMatch) {
+      // 1.1 Support cases with comma before zip or different spacing
+      usCaMatch = geo.match(/^(.*?)[,\s]+([A-Z]{2})[,\s]+(\d{5}(?:-\d{4})?|[A-Z]\d[A-Z]\s*\d[A-Z]\d)$/i);
+    }
+    if (!usCaMatch) {
       // 2. Full State Name: "City, StateName Zip"
-      usCaMatch = geo.match(/^(.*?)[,\s]+([A-Za-z\s]{3,20})\s+(\d{5}(?:-\d{4})?)$/i);
+      usCaMatch = geo.match(/^(.*?)[,\s]+([A-Za-z\s]{3,20})[,\s]+(\d{5}(?:-\d{4})?)$/i) ||
+                  geo.match(/^(.*?)[,\s]+([A-Za-z\s]{3,20})\s+(\d{5}(?:-\d{4})?)$/i);
     }
     if (!usCaMatch) {
       // 3. Reversed Zip: "Zip City State"
@@ -358,9 +367,10 @@ var OMS_Utils = {
     }
 
     // 3. Addr1 is whatever is left
-    if (working.length) {
-      d.addr1 = working.join(', ');
+    if (d.success) {
+      d.addr1 = working.length ? working.join(', ') : originalBlock;
     } else {
+      d.city = ""; d.state = ""; d.zip = "";
       d.addr1 = originalBlock;
     }
 
