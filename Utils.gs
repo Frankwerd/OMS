@@ -181,10 +181,14 @@ var OMS_Utils = {
     const model = (String(p.model || '').toUpperCase().includes('PRO')) ? 'PRO' : 'BAS';
     const club = (String(p.clubType || '').toUpperCase().includes('WOOD')) ? 'WD' : 'IR';
     const hand = (String(p.hand || '').toUpperCase().startsWith('L')) ? 'L' : 'R';
-    const flex = (String(p.flex || '').toUpperCase()) || 'R';
+
+    // Normalize flex: R, S, L, X (default R)
+    let flex = String(p.flex || '').toUpperCase().charAt(0);
+    if (!['R','S','L','X'].includes(flex)) flex = 'R';
+
     const length = (String(p.length || '').toUpperCase().includes('LONG')) ? 'LG' : 'ST';
     const grip = (String(p.gripSize || '').toUpperCase().includes('MID')) ? 'MS' : 'ST';
-    const mag = (String(p.magSafeStand || '') === 'Yes' || String(p.magSafeStand || '') === '1') ? 'M' : '0';
+    const mag = (String(p.magSafeStand || '') === 'Yes' || String(p.magSafeStand || '') === '1' || String(p.magSafeStand || '').toUpperCase() === 'TRUE') ? 'M' : '0';
 
     return `GG-${model}-${club}-${hand}${flex}-${length}-${grip}-${mag}`;
   },
@@ -243,46 +247,42 @@ var OMS_Utils = {
   },
 
   /********************************
-   * Address Parsing (Robust Legacy)
+   * Address Parsing (Robust)
    * Supports US/CA/EU/UK/JP/KR
    ********************************/
   parseGlobalAddress(lines) {
-    let d = { addr1: "", city: "", state: "", zip: "", country: "United States" };
+    let d = { addr1: "", city: "", state: "", zip: "", country: "United States", success: false };
     if (!lines || !lines.length) return d;
 
+    const originalBlock = lines.join(', ');
     let working = lines.map(l => String(l || '').trim()).filter(Boolean);
     if (!working.length) return d;
 
     // 1. Identify country from last line
     const lastLine = working[working.length - 1].toUpperCase();
     const countryMap = {
-      'UNITED STATES': 'United States',
+      'UNITED STATES': 'United States', 'USA': 'United States',
       'CANADA': 'Canada',
-      'UNITED KINGDOM': 'United Kingdom',
-      'UK': 'United Kingdom',
+      'UNITED KINGDOM': 'United Kingdom', 'UK': 'United Kingdom', 'GREAT BRITAIN': 'United Kingdom',
       'JAPAN': 'Japan',
-      'KOREA': 'South Korea',
-      'SOUTH KOREA': 'South Korea',
-      'REPUBLIC OF KOREA': 'South Korea',
-      'GERMANY': 'Germany',
+      'KOREA': 'South Korea', 'SOUTH KOREA': 'South Korea', 'REPUBLIC OF KOREA': 'South Korea', 'ROK': 'South Korea',
+      'GERMANY': 'Germany', 'DEUTSCHLAND': 'Germany',
       'FRANCE': 'France',
       'ITALY': 'Italy',
       'SPAIN': 'Spain',
       'AUSTRALIA': 'Australia'
     };
 
-    let countryDetected = false;
     for (let key in countryMap) {
       if (lastLine === key || lastLine.endsWith(' ' + key)) {
         d.country = countryMap[key];
         working.pop();
-        countryDetected = true;
         break;
       }
     }
 
     if (!working.length) {
-      d.addr1 = lines.join(', ');
+      d.addr1 = originalBlock;
       return d;
     }
 
@@ -295,6 +295,7 @@ var OMS_Utils = {
       d.city = usCaMatch[1].trim();
       d.state = usCaMatch[2].trim().toUpperCase();
       d.zip = usCaMatch[3].trim().toUpperCase();
+      d.success = true;
     }
     // UK Pattern: "City Postcode"
     else if (d.country === 'United Kingdom') {
@@ -302,6 +303,7 @@ var OMS_Utils = {
       if (ukMatch) {
         d.city = ukMatch[1].trim();
         d.zip = ukMatch[2].trim().toUpperCase();
+        d.success = true;
       } else {
         d.city = geo;
       }
@@ -312,6 +314,7 @@ var OMS_Utils = {
       if (eastMatch) {
         d.zip = eastMatch[1].trim();
         d.city = eastMatch[2].trim();
+        d.success = true;
       } else {
         d.city = geo;
       }
@@ -327,6 +330,7 @@ var OMS_Utils = {
           d.zip = euMatch[1].trim();
           d.city = euMatch[2].trim();
         }
+        d.success = true;
       } else {
         d.city = geo;
       }
@@ -335,9 +339,8 @@ var OMS_Utils = {
     // 3. Addr1 is whatever is left
     if (working.length) {
       d.addr1 = working.join(', ');
-    } else if (!d.addr1) {
-      // Fallback if we have nothing left, use original lines
-      d.addr1 = lines.join(', ');
+    } else {
+      d.addr1 = originalBlock;
     }
 
     return d;

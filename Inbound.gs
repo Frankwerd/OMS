@@ -8,6 +8,8 @@
  * Inbound Shopify ingestion
  */
 function inbound_runShopify() {
+  const ss = OMS_Utils.ss();
+  validateSchema(ss);
   const inbound = OMS_Utils.sheet_(OMS_CONFIG.TABS.INBOUND);
 
   const required = [
@@ -40,8 +42,11 @@ function inbound_runShopify() {
         const clean = OMS_Utils.ultraCleanText_(msg.getBody());
         const parsed = inbound_parseShopifyOrder_(clean);
 
-        const customerId = OMS_Utils.lookupOrCreateCustomerId_(parsed.buyerEmail);
-        const emailHash = OMS_Utils.emailHash_(parsed.buyerEmail);
+        // Standardize reshipments as Outbound-only
+        if (String(parsed.orderId).toUpperCase().endsWith(OMS_CONFIG.RESHIP_SUFFIX)) return;
+
+        const customerId = parsed.buyerEmail ? OMS_Utils.lookupOrCreateCustomerId_(parsed.buyerEmail) : 'C-UNKNOWN';
+        const emailHash = parsed.buyerEmail ? OMS_Utils.emailHash_(parsed.buyerEmail) : '';
 
         const sourceSystem = OMS_CONFIG.SOURCE_SYSTEMS.SHOPIFY;
         const sourceOrderId = parsed.orderId;
@@ -101,11 +106,11 @@ function inbound_runShopify() {
 
             // ops fields
             serialAllocated: '',
-            notes: '',
+            notes: parsed.parseNotes || '',
             automationNotes: '',
             itemLifeCycle: 'ACTIVE',
             orderLifeCycle: 'ACTIVE',
-            parseStatus: 'OK',
+            parseStatus: parsed.parseStatus || 'OK',
 
             createdAt: stamp,
             updatedAt: stamp,
@@ -152,11 +157,15 @@ function inbound_runShopify() {
 function inbound_parseShopifyOrder_(text) {
   const t = String(text || '');
   const u = t.toUpperCase();
+  let parseStatus = 'OK', parseNotes = '';
 
   // Order ID: Order #1234
   const idMatch = t.match(/Order\s*#?\s*(\d{4,10})/i);
-  const orderId = idMatch ? idMatch[1] : '';
-  if (!orderId) throw new Error('Shopify Order ID not found');
+  let orderId = idMatch ? idMatch[1] : '';
+  if (!orderId) {
+    orderId = 'UNKNOWN';
+    parseStatus = OMS_CONFIG.ERRORS.MISSING_ORDER_ID;
+  }
 
   // Date: Feb 15, 2024
   const dateMatch = t.match(/([A-Z][a-z]{2}\s\d{1,2},\s\d{4})/);
@@ -164,8 +173,10 @@ function inbound_parseShopifyOrder_(text) {
 
   // Email
   const emailMatch = t.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
-  const buyerEmail = emailMatch ? emailMatch[1].trim() : '';
-  if (!buyerEmail) throw new Error('Shopify buyer-email not found');
+  let buyerEmail = emailMatch ? emailMatch[1].trim() : '';
+  if (!buyerEmail && parseStatus === 'OK') {
+    parseStatus = OMS_CONFIG.ERRORS.MISSING_EMAIL;
+  }
 
   // Shipping
   let shipAddr1 = '', shipCity = '', shipState = '', shipPostal = '', shipCountry = 'United States';
@@ -178,6 +189,12 @@ function inbound_parseShopifyOrder_(text) {
     shipState = addr.state;
     shipPostal = addr.zip;
     shipCountry = addr.country || shipCountry;
+    if (!addr.success) {
+      parseStatus = OMS_CONFIG.ERRORS.MISSING_ADDRESS;
+      parseNotes = 'Address parsing fallback to raw block.';
+    }
+  } else {
+    parseStatus = OMS_CONFIG.ERRORS.MISSING_ADDRESS;
   }
 
   // Items
@@ -218,7 +235,9 @@ function inbound_parseShopifyOrder_(text) {
     shipCountry,
     items,
     totalAmount: 0, // could sum from text if needed
-    currency: 'USD'
+    currency: 'USD',
+    parseStatus,
+    parseNotes
   };
 }
 
@@ -226,6 +245,8 @@ function inbound_parseShopifyOrder_(text) {
  * Inbound Imweb ingestion (KR localized)
  */
 function inbound_runImweb() {
+  const ss = OMS_Utils.ss();
+  validateSchema(ss);
   const inbound = OMS_Utils.sheet_(OMS_CONFIG.TABS.INBOUND);
 
   const required = [
@@ -258,8 +279,11 @@ function inbound_runImweb() {
         const clean = OMS_Utils.ultraCleanText_(msg.getBody());
         const parsed = inbound_parseImwebOrder_(clean);
 
-        const customerId = OMS_Utils.lookupOrCreateCustomerId_(parsed.buyerEmail);
-        const emailHash = OMS_Utils.emailHash_(parsed.buyerEmail);
+        // Standardize reshipments as Outbound-only
+        if (String(parsed.orderId).toUpperCase().endsWith(OMS_CONFIG.RESHIP_SUFFIX)) return;
+
+        const customerId = parsed.buyerEmail ? OMS_Utils.lookupOrCreateCustomerId_(parsed.buyerEmail) : 'C-UNKNOWN';
+        const emailHash = parsed.buyerEmail ? OMS_Utils.emailHash_(parsed.buyerEmail) : '';
 
         const sourceSystem = OMS_CONFIG.SOURCE_SYSTEMS.IMWEB;
         const sourceOrderId = parsed.orderId;
@@ -308,11 +332,11 @@ function inbound_runImweb() {
             shipPostal: parsed.shipPostal,
             shipCountry: parsed.shipCountry || 'South Korea',
             serialAllocated: '',
-            notes: '',
+            notes: parsed.parseNotes || '',
             automationNotes: '',
             itemLifeCycle: 'ACTIVE',
             orderLifeCycle: 'ACTIVE',
-            parseStatus: 'OK',
+            parseStatus: parsed.parseStatus || 'OK',
             createdAt: stamp,
             updatedAt: stamp,
             sourceSystem,
@@ -352,17 +376,23 @@ function inbound_runImweb() {
  */
 function inbound_parseImwebOrder_(text) {
   const t = String(text || '');
+  let parseStatus = 'OK', parseNotes = '';
 
   const idMatch = t.match(/주문번호\s*[:]\s*([A-Z0-9\-]+)/) || t.match(/Order\s*No\.\s*([A-Z0-9\-]+)/i);
-  const orderId = idMatch ? idMatch[1] : '';
-  if (!orderId) throw new Error('Imweb Order ID not found');
+  let orderId = idMatch ? idMatch[1] : '';
+  if (!orderId) {
+    orderId = 'UNKNOWN';
+    parseStatus = OMS_CONFIG.ERRORS.MISSING_ORDER_ID;
+  }
 
   const dateMatch = t.match(/주문일시\s*[:]\s*(\d{4}-\d{2}-\d{2})/);
   const purchaseDate = dateMatch ? dateMatch[1] : '';
 
   const emailMatch = t.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
-  const buyerEmail = emailMatch ? emailMatch[1] : '';
-  if (!buyerEmail) throw new Error('Imweb buyer-email not found');
+  let buyerEmail = emailMatch ? emailMatch[1] : '';
+  if (!buyerEmail && parseStatus === 'OK') {
+    parseStatus = OMS_CONFIG.ERRORS.MISSING_EMAIL;
+  }
 
   // Address
   let shipAddr1 = '', shipCity = '', shipState = '', shipPostal = '', shipCountry = 'South Korea';
@@ -378,7 +408,11 @@ function inbound_parseImwebOrder_(text) {
       shipCity = shipAddr1.split(' ')[0];
     } else {
       shipAddr1 = raw;
+      parseStatus = OMS_CONFIG.ERRORS.MISSING_ADDRESS;
+      parseNotes = 'KR address parsing fallback.';
     }
+  } else {
+    parseStatus = OMS_CONFIG.ERRORS.MISSING_ADDRESS;
   }
 
   // Items
@@ -416,11 +450,15 @@ function inbound_parseImwebOrder_(text) {
     shipCountry,
     items,
     totalAmount: 0,
-    currency: 'KRW'
+    currency: 'KRW',
+    parseStatus,
+    parseNotes
   };
 }
 
 function inbound_runSamCart() {
+  const ss = OMS_Utils.ss();
+  validateSchema(ss);
   const inbound = OMS_Utils.sheet_(OMS_CONFIG.TABS.INBOUND);
 
   const required = [
@@ -453,8 +491,11 @@ function inbound_runSamCart() {
         const clean = OMS_Utils.ultraCleanText_(msg.getBody());
         const parsed = inbound_parseSamCartInvoice_(clean);
 
-        const customerId = OMS_Utils.lookupOrCreateCustomerId_(parsed.buyerEmail);
-        const emailHash = OMS_Utils.emailHash_(parsed.buyerEmail);
+        // Standardize reshipments as Outbound-only
+        if (String(parsed.orderId).toUpperCase().endsWith(OMS_CONFIG.RESHIP_SUFFIX)) return;
+
+        const customerId = parsed.buyerEmail ? OMS_Utils.lookupOrCreateCustomerId_(parsed.buyerEmail) : 'C-UNKNOWN';
+        const emailHash = parsed.buyerEmail ? OMS_Utils.emailHash_(parsed.buyerEmail) : '';
 
         const sourceSystem = OMS_CONFIG.SOURCE_SYSTEMS.SAMCART;
         const sourceOrderId = parsed.orderId;
@@ -523,11 +564,11 @@ function inbound_runSamCart() {
 
             // ops fields
             serialAllocated: '',
-            notes: '',
+            notes: parsed.parseNotes || '',
             automationNotes: '',
             itemLifeCycle: 'ACTIVE',
             orderLifeCycle: (Number(parsed.refundAmount || 0) > 0 ? 'PARTIAL_REFUND' : 'ACTIVE'),
-            parseStatus: 'OK',
+            parseStatus: parsed.parseStatus || 'OK',
 
             createdAt: stamp,
             updatedAt: stamp,
@@ -586,11 +627,15 @@ function inbound_collectExistingMessageIds_(sheet, msgCol) {
 function inbound_parseSamCartInvoice_(text) {
   const t = String(text || '');
   const u = t.toUpperCase();
+  let parseStatus = 'OK', parseNotes = '';
 
   // Order ID
   const idMatch = t.match(/Order\s*ID:\s*#?\s*([A-Za-z0-9\-]+)/i) || t.match(/Order\s*#\s*([A-Za-z0-9\-]+)/i);
-  const orderId = idMatch ? String(idMatch[1]).trim() : '';
-  if (!orderId) throw new Error('Order ID not found');
+  let orderId = idMatch ? String(idMatch[1]).trim() : '';
+  if (!orderId) {
+    orderId = 'UNKNOWN';
+    parseStatus = OMS_CONFIG.ERRORS.MISSING_ORDER_ID;
+  }
 
   // Date
   const dateMatch =
@@ -609,7 +654,9 @@ function inbound_parseSamCartInvoice_(text) {
     const emails = [...t.matchAll(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/g)].map(m => m[1]);
     buyerEmail = emails[0] ? String(emails[0]).trim() : '';
   }
-  if (!buyerEmail) throw new Error('buyer-email not found');
+  if (!buyerEmail && parseStatus === 'OK') {
+    parseStatus = OMS_CONFIG.ERRORS.MISSING_EMAIL;
+  }
 
   // Phone
   const phoneMatch =
@@ -628,9 +675,17 @@ function inbound_parseSamCartInvoice_(text) {
     shipState = addr.state;
     shipPostal = addr.zip;
     shipCountry = addr.country || shipCountry;
+    if (!addr.success) {
+      parseStatus = OMS_CONFIG.ERRORS.MISSING_ADDRESS;
+      parseNotes = 'Address parsing fallback to raw block.';
+    }
+  } else {
+    parseStatus = OMS_CONFIG.ERRORS.MISSING_ADDRESS;
   }
 
   // Specs (same as legacy)
+  const model = u.includes('PRO') ? 'Pro' : 'Basic';
+  const clubType = u.includes('WOOD') ? 'Wood' : 'Iron';
   const flex = (u.includes('L-FLEX') || u.includes('LADIE')) ? 'L' : (u.includes('R-FLEX') || u.includes('REGULAR')) ? 'R' : 'S';
   const gripSize = (u.includes('MIDSIZE') || u.includes('MID SIZE')) ? 'Mid' : 'Standard';
   const length = u.includes('LONGER') ? 'Longer' : 'Standard';
@@ -677,8 +732,8 @@ function inbound_parseSamCartInvoice_(text) {
     shipServiceLevel: '',
 
     productName: '',
-    model: '',        // your Pro/Basic can be inferred later if text contains
-    clubType: '',
+    model,
+    clubType,
 
     hand,
     flex,
@@ -702,14 +757,16 @@ function inbound_parseSamCartInvoice_(text) {
       sku,
       quantity,
       productName: '',
-      model: '',
-      clubType: '',
+      model,
+      clubType,
       hand,
       flex,
       length,
       gripSize,
       magSafeStand,
     }],
+    parseStatus,
+    parseNotes
   };
 }
 
