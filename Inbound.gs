@@ -4,6 +4,422 @@
  * NO triggers created automatically
  ********************************/
 
+/**
+ * Inbound Shopify ingestion
+ */
+function inbound_runShopify() {
+  const inbound = OMS_Utils.sheet_(OMS_CONFIG.TABS.INBOUND);
+
+  const required = [
+    'merchant-order-id','merchant-order-item-id','purchase-date','buyer-email','customer-id','system-gmail-id',
+    'sales-channel','sku','quantity-purchased',
+    'source-system','source-order-id','source-order-item-id','oms-order-id','oms-order-item-id','buyer-email-hash',
+    'system-created-at','system-updated-at','parse-status'
+  ];
+  const cols = OMS_Utils.requireCols_(inbound, required);
+
+  const labels = {
+    toProcess: OMS_Utils.getOrCreateLabel_(OMS_CONFIG.GMAIL.SHOPIFY_TO_PROCESS),
+    processed: OMS_Utils.getOrCreateLabel_(OMS_CONFIG.GMAIL.SHOPIFY_PROCESSED),
+    error: OMS_Utils.getOrCreateLabel_(OMS_CONFIG.GMAIL.SHOPIFY_ERROR),
+  };
+
+  const threads = labels.toProcess.getThreads();
+  if (!threads.length) return;
+
+  const existing = inbound_collectExistingMessageIds_(inbound, cols['system-gmail-id']);
+
+  threads.reverse().forEach(thread => {
+    let okThread = true;
+
+    thread.getMessages().forEach(msg => {
+      const msgId = String(msg.getId() || '').trim().toLowerCase();
+      if (!msgId || existing.has(msgId)) return;
+
+      try {
+        const clean = OMS_Utils.ultraCleanText_(msg.getBody());
+        const parsed = inbound_parseShopifyOrder_(clean);
+
+        const customerId = OMS_Utils.lookupOrCreateCustomerId_(parsed.buyerEmail);
+        const emailHash = OMS_Utils.emailHash_(parsed.buyerEmail);
+
+        const sourceSystem = OMS_CONFIG.SOURCE_SYSTEMS.SHOPIFY;
+        const sourceOrderId = parsed.orderId;
+        const omsOrderId = OMS_Utils.buildOmsOrderId_(sourceSystem, sourceOrderId);
+
+        const now = new Date();
+        const stamp = Utilities.formatDate(now, OMS_CONFIG.TZ, 'yyyy-MM-dd HH:mm:ss');
+
+        const rows = [];
+        parsed.items.forEach((it, idx) => {
+          const sourceOrderItemId = it.itemId || OMS_Utils.generateLineItemId_(idx + 1);
+          const omsOrderItemId = OMS_Utils.buildOmsOrderItemId_(omsOrderId, sourceOrderItemId);
+
+          rows.push(inbound_buildRowFromHeaders_(cols, inbound.getLastColumn(), {
+            // core ids
+            merchantOrderId: sourceOrderId,
+            merchantOrderItemId: sourceOrderItemId,
+
+            purchaseDate: parsed.purchaseDate,
+            purchaseTime: parsed.purchaseTime,
+
+            buyerEmail: parsed.buyerEmail,
+            buyerName: parsed.buyerName,
+            buyerPhone: parsed.buyerPhone,
+
+            customerId,
+            systemGmailId: msgId,
+
+            salesChannel: 'Shopify',
+            customerClassification: 'Active',
+            isBusinessOrder: 'false',
+
+            sku: it.sku || 'SHOPIFY-UNMAPPED',
+            productName: it.productName,
+            magSafeStand: it.magSafeStand,
+            model: it.model,
+            clubType: it.clubType,
+            hand: it.hand,
+            flex: it.flex,
+            length: it.length,
+            gripSize: it.gripSize,
+
+            qty: it.quantity || 1,
+            currency: parsed.currency || 'USD',
+            itemPrice: it.price,
+            itemTax: (parsed.tax / parsed.items.length), // simple split
+            shippingPrice: (parsed.shipping / parsed.items.length),
+            totalAmount: parsed.totalAmount,
+            couponCode: parsed.couponCode,
+
+            recipientName: parsed.recipientName || parsed.buyerName,
+            shipAddr1: parsed.shipAddr1,
+            shipCity: parsed.shipCity,
+            shipState: parsed.shipState,
+            shipPostal: parsed.shipPostal,
+            shipCountry: parsed.shipCountry,
+
+            // ops fields
+            serialAllocated: '',
+            notes: '',
+            automationNotes: '',
+            itemLifeCycle: 'ACTIVE',
+            orderLifeCycle: 'ACTIVE',
+            parseStatus: 'OK',
+
+            createdAt: stamp,
+            updatedAt: stamp,
+
+            // canonical
+            sourceSystem,
+            sourceOrderId,
+            sourceOrderItemId,
+            omsOrderId,
+            omsOrderItemId,
+            buyerEmailHash: emailHash,
+          }));
+        });
+
+        if (!rows.length) throw new Error('No items parsed from Shopify order.');
+
+        inbound.getRange(inbound.getLastRow() + 1, 1, rows.length, rows[0].length)
+          .setNumberFormat('@')
+          .setValues(rows);
+
+        existing.add(msgId);
+
+      } catch (err) {
+        okThread = false;
+        OMS_Utils.opsAlert_(
+          `Shopify parse/write failed.\nThread: ${thread.getId()}\nMsg: ${msg.getId()}\nError: ${err.message}`
+        );
+      }
+    });
+
+    if (okThread) {
+      thread.removeLabel(labels.toProcess).addLabel(labels.processed).moveToArchive();
+    } else {
+      thread.removeLabel(labels.toProcess).addLabel(labels.error);
+    }
+  });
+
+  SpreadsheetApp.flush();
+}
+
+/**
+ * Shopify parsing logic
+ */
+function inbound_parseShopifyOrder_(text) {
+  const t = String(text || '');
+  const u = t.toUpperCase();
+
+  // Order ID: Order #1234
+  const idMatch = t.match(/Order\s*#?\s*(\d{4,10})/i);
+  const orderId = idMatch ? idMatch[1] : '';
+  if (!orderId) throw new Error('Shopify Order ID not found');
+
+  // Date: Feb 15, 2024
+  const dateMatch = t.match(/([A-Z][a-z]{2}\s\d{1,2},\s\d{4})/);
+  const purchaseDate = dateMatch ? normalizeDateYYYYMMDD_(dateMatch[1]) : '';
+
+  // Email
+  const emailMatch = t.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
+  const buyerEmail = emailMatch ? emailMatch[1].trim() : '';
+  if (!buyerEmail) throw new Error('Shopify buyer-email not found');
+
+  // Shipping
+  let shipAddr1 = '', shipCity = '', shipState = '', shipPostal = '', shipCountry = 'United States';
+  const shipMatch = t.match(/Shipping address\n([\s\S]*?)\n(?:Billing address|Payment method|Shipping method)/i);
+  if (shipMatch) {
+    const lines = shipMatch[1].split('\n').map(x => x.trim()).filter(Boolean);
+    const addr = OMS_Utils.parseGlobalAddress(lines);
+    shipAddr1 = addr.addr1;
+    shipCity = addr.city;
+    shipState = addr.state;
+    shipPostal = addr.zip;
+    shipCountry = addr.country || shipCountry;
+  }
+
+  // Items
+  const items = [];
+  // Basic Shopify email item pattern: [Product Name] - [Variant] x [Qty]
+  // This is highly variable, but we'll attempt a common one.
+  const itemBlocks = [...t.matchAll(/(.*)\s+×\s+(\d+)\n\$([\d,.]+)/g)];
+  itemBlocks.forEach(m => {
+    const rawName = m[1].trim();
+    const qty = parseInt(m[2]);
+    const price = parseFloat(m[3].replace(/,/g, ''));
+
+    // Specs from variant string? e.g. "G-GRIP Pro - Wood / Right / Regular / Standard / Standard / Yes"
+    const specs = {
+      productName: rawName,
+      quantity: qty,
+      price: price,
+      model: rawName.toUpperCase().includes('PRO') ? 'Pro' : 'Basic',
+      clubType: rawName.toUpperCase().includes('WOOD') ? 'Wood' : 'Iron',
+      hand: rawName.toUpperCase().includes('LEFT') ? 'Left' : 'Right',
+      flex: rawName.toUpperCase().includes('L-FLEX') ? 'L' : (rawName.toUpperCase().includes('S-FLEX') ? 'S' : 'R'),
+      length: rawName.toUpperCase().includes('LONGER') ? 'Longer' : 'Standard',
+      gripSize: rawName.toUpperCase().includes('MID') ? 'Mid' : 'Standard',
+      magSafeStand: rawName.toUpperCase().includes('YES') ? 'Yes' : '0'
+    };
+    specs.sku = OMS_Utils.deriveSku(specs);
+    items.push(specs);
+  });
+
+  return {
+    orderId,
+    purchaseDate,
+    buyerEmail,
+    shipAddr1,
+    shipCity,
+    shipState,
+    shipPostal,
+    shipCountry,
+    items,
+    totalAmount: 0, // could sum from text if needed
+    currency: 'USD'
+  };
+}
+
+/**
+ * Inbound Imweb ingestion (KR localized)
+ */
+function inbound_runImweb() {
+  const inbound = OMS_Utils.sheet_(OMS_CONFIG.TABS.INBOUND);
+
+  const required = [
+    'merchant-order-id','merchant-order-item-id','purchase-date','buyer-email','customer-id','system-gmail-id',
+    'sales-channel','sku','quantity-purchased',
+    'source-system','source-order-id','source-order-item-id','oms-order-id','oms-order-item-id','buyer-email-hash',
+    'system-created-at','system-updated-at','parse-status'
+  ];
+  const cols = OMS_Utils.requireCols_(inbound, required);
+
+  const labels = {
+    toProcess: OMS_Utils.getOrCreateLabel_(OMS_CONFIG.GMAIL.IMWEB_TO_PROCESS),
+    processed: OMS_Utils.getOrCreateLabel_(OMS_CONFIG.GMAIL.IMWEB_PROCESSED),
+    error: OMS_Utils.getOrCreateLabel_(OMS_CONFIG.GMAIL.IMWEB_ERROR),
+  };
+
+  const threads = labels.toProcess.getThreads();
+  if (!threads.length) return;
+
+  const existing = inbound_collectExistingMessageIds_(inbound, cols['system-gmail-id']);
+
+  threads.reverse().forEach(thread => {
+    let okThread = true;
+
+    thread.getMessages().forEach(msg => {
+      const msgId = String(msg.getId() || '').trim().toLowerCase();
+      if (!msgId || existing.has(msgId)) return;
+
+      try {
+        const clean = OMS_Utils.ultraCleanText_(msg.getBody());
+        const parsed = inbound_parseImwebOrder_(clean);
+
+        const customerId = OMS_Utils.lookupOrCreateCustomerId_(parsed.buyerEmail);
+        const emailHash = OMS_Utils.emailHash_(parsed.buyerEmail);
+
+        const sourceSystem = OMS_CONFIG.SOURCE_SYSTEMS.IMWEB;
+        const sourceOrderId = parsed.orderId;
+        const omsOrderId = OMS_Utils.buildOmsOrderId_(sourceSystem, sourceOrderId);
+
+        const now = new Date();
+        const stamp = Utilities.formatDate(now, OMS_CONFIG.TZ, 'yyyy-MM-dd HH:mm:ss');
+
+        const rows = [];
+        parsed.items.forEach((it, idx) => {
+          const sourceOrderItemId = it.itemId || OMS_Utils.generateLineItemId_(idx + 1);
+          const omsOrderItemId = OMS_Utils.buildOmsOrderItemId_(omsOrderId, sourceOrderItemId);
+
+          rows.push(inbound_buildRowFromHeaders_(cols, inbound.getLastColumn(), {
+            merchantOrderId: sourceOrderId,
+            merchantOrderItemId: sourceOrderItemId,
+            purchaseDate: parsed.purchaseDate,
+            purchaseTime: parsed.purchaseTime,
+            buyerEmail: parsed.buyerEmail,
+            buyerName: parsed.buyerName,
+            buyerPhone: parsed.buyerPhone,
+            customerId,
+            systemGmailId: msgId,
+            salesChannel: 'Imweb',
+            customerClassification: 'Active',
+            isBusinessOrder: 'false',
+            sku: it.sku || 'IMWEB-UNMAPPED',
+            productName: it.productName,
+            magSafeStand: it.magSafeStand,
+            model: it.model,
+            clubType: it.clubType,
+            hand: it.hand,
+            flex: it.flex,
+            length: it.length,
+            gripSize: it.gripSize,
+            qty: it.quantity || 1,
+            currency: 'KRW',
+            itemPrice: it.price,
+            itemTax: 0,
+            shippingPrice: (parsed.shipping || 0) / parsed.items.length,
+            totalAmount: parsed.totalAmount,
+            recipientName: parsed.recipientName || parsed.buyerName,
+            shipAddr1: parsed.shipAddr1,
+            shipCity: parsed.shipCity,
+            shipState: parsed.shipState,
+            shipPostal: parsed.shipPostal,
+            shipCountry: parsed.shipCountry || 'South Korea',
+            serialAllocated: '',
+            notes: '',
+            automationNotes: '',
+            itemLifeCycle: 'ACTIVE',
+            orderLifeCycle: 'ACTIVE',
+            parseStatus: 'OK',
+            createdAt: stamp,
+            updatedAt: stamp,
+            sourceSystem,
+            sourceOrderId,
+            sourceOrderItemId,
+            omsOrderId,
+            omsOrderItemId,
+            buyerEmailHash: emailHash,
+          }));
+        });
+
+        if (!rows.length) throw new Error('No items parsed from Imweb order.');
+
+        inbound.getRange(inbound.getLastRow() + 1, 1, rows.length, rows[0].length)
+          .setNumberFormat('@')
+          .setValues(rows);
+
+        existing.add(msgId);
+      } catch (err) {
+        okThread = false;
+        OMS_Utils.opsAlert_(`Imweb parse failed.\nMsg: ${msg.getId()}\nError: ${err.message}`);
+      }
+    });
+
+    if (okThread) {
+      thread.removeLabel(labels.toProcess).addLabel(labels.processed).moveToArchive();
+    } else {
+      thread.removeLabel(labels.toProcess).addLabel(labels.error);
+    }
+  });
+
+  SpreadsheetApp.flush();
+}
+
+/**
+ * Imweb parsing logic (simplified example)
+ */
+function inbound_parseImwebOrder_(text) {
+  const t = String(text || '');
+
+  const idMatch = t.match(/주문번호\s*[:]\s*([A-Z0-9\-]+)/) || t.match(/Order\s*No\.\s*([A-Z0-9\-]+)/i);
+  const orderId = idMatch ? idMatch[1] : '';
+  if (!orderId) throw new Error('Imweb Order ID not found');
+
+  const dateMatch = t.match(/주문일시\s*[:]\s*(\d{4}-\d{2}-\d{2})/);
+  const purchaseDate = dateMatch ? dateMatch[1] : '';
+
+  const emailMatch = t.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
+  const buyerEmail = emailMatch ? emailMatch[1] : '';
+  if (!buyerEmail) throw new Error('Imweb buyer-email not found');
+
+  // Address
+  let shipAddr1 = '', shipCity = '', shipState = '', shipPostal = '', shipCountry = 'South Korea';
+  const addrMatch = t.match(/배송지\s*주소\s*[:]\s*(.*)/);
+  if (addrMatch) {
+    const raw = addrMatch[1].trim();
+    // basic KR parse: [12345] Seoul...
+    const krZip = raw.match(/^\[(\d{5})\]\s*(.*)$/);
+    if (krZip) {
+      shipPostal = krZip[1];
+      shipAddr1 = krZip[2];
+      // simplistic city extraction for KR
+      shipCity = shipAddr1.split(' ')[0];
+    } else {
+      shipAddr1 = raw;
+    }
+  }
+
+  // Items
+  const items = [];
+  // Sample: 상품명 : G-GRIP Pro (Option: Right/Regular) x 1
+  const itemMatch = [...t.matchAll(/상품명\s*[:]\s*([^\(]+)(?:\(옵션\s*[:]\s*([^\)]+)\))?\s*x\s*(\d+)/g)];
+  itemMatch.forEach(m => {
+    const prodName = m[1].trim();
+    const optStr = (m[2] || '').trim().toUpperCase();
+    const qty = parseInt(m[3]);
+
+    const specs = {
+      productName: prodName,
+      quantity: qty,
+      model: prodName.toUpperCase().includes('PRO') ? 'Pro' : 'Basic',
+      clubType: optStr.includes('WOOD') ? 'Wood' : 'Iron',
+      hand: optStr.includes('LEFT') ? 'Left' : 'Right',
+      flex: optStr.includes('L-FLEX') ? 'L' : (optStr.includes('S-FLEX') ? 'S' : 'R'),
+      length: optStr.includes('LONGER') ? 'Longer' : 'Standard',
+      gripSize: optStr.includes('MID') ? 'Mid' : 'Standard',
+      magSafeStand: optStr.includes('YES') ? 'Yes' : '0'
+    };
+    specs.sku = OMS_Utils.deriveSku(specs);
+    items.push(specs);
+  });
+
+  return {
+    orderId,
+    purchaseDate,
+    buyerEmail,
+    shipAddr1,
+    shipCity,
+    shipState,
+    shipPostal,
+    shipCountry,
+    items,
+    totalAmount: 0,
+    currency: 'KRW'
+  };
+}
+
 function inbound_runSamCart() {
   const inbound = OMS_Utils.sheet_(OMS_CONFIG.TABS.INBOUND);
 
@@ -51,6 +467,11 @@ function inbound_runSamCart() {
         parsed.items.forEach((it, idx) => {
           const sourceOrderItemId = OMS_Utils.generateLineItemId_(idx + 1);
           const omsOrderItemId = OMS_Utils.buildOmsOrderItemId_(omsOrderId, sourceOrderItemId);
+
+          // Derive SKU if not present or placeholder
+          if (!it.sku || it.sku === 'SAMCART-UNMAPPED') {
+            it.sku = OMS_Utils.deriveSku(it);
+          }
 
           rows.push(inbound_buildRowFromHeaders_(cols, inbound.getLastColumn(), {
             // core ids
@@ -364,8 +785,5 @@ function inbound_buildRowFromHeaders_(headersMap, lastCol, v) {
 }
 
 function normalizeDateYYYYMMDD_(dateStr) {
-  const s = String(dateStr || '').replace(/(st|nd|rd|th)/g, '').replace(/,/g, '').trim();
-  const d = new Date(s);
-  if (isNaN(d.getTime())) return '';
-  return Utilities.formatDate(d, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  return OMS_Utils.normalizeDateYYYYMMDD(dateStr);
 }

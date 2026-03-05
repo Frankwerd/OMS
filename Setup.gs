@@ -11,6 +11,7 @@ function omsSetupSheet() {
   const inbound = getOrCreateSheet_(ss, OMS_CONFIG.TABS.INBOUND);
   const outbound = getOrCreateSheet_(ss, OMS_CONFIG.TABS.OUTBOUND);
   const master = getOrCreateSheet_(ss, OMS_CONFIG.TABS.MASTER);
+  const meta = getOrCreateSheet_(ss, OMS_CONFIG.TABS.META);
 
   // IMPORTANT:
   // Inbound/Outbound get filters (table sheets)
@@ -18,6 +19,12 @@ function omsSetupSheet() {
   applyHeaderRow_(inbound, OMS_SCHEMA_INBOUND_(), { createFilter: true, clearAll: true });
   applyHeaderRow_(outbound, OMS_SCHEMA_OUTBOUND_(), { createFilter: true, clearAll: true });
   applyHeaderRow_(master, OMS_SCHEMA_MASTER_(), { createFilter: false, clearAll: true }); // ✅ FIX
+
+  updateMetaSheet_(ss, meta, {
+    [OMS_CONFIG.TABS.INBOUND]: OMS_SCHEMA_INBOUND_(),
+    [OMS_CONFIG.TABS.OUTBOUND]: OMS_SCHEMA_OUTBOUND_(),
+  });
+  meta.hideSheet();
 
   styleInbound_(inbound);
   styleOutbound_(outbound);
@@ -76,6 +83,25 @@ function OMS_SCHEMA_MASTER_() {
 
 function getOrCreateSheet_(ss, name) {
   return ss.getSheetByName(name) || ss.insertSheet(name);
+}
+
+/**
+ * Update _Meta sheet with header-to-column mappings
+ */
+function updateMetaSheet_(ss, meta, schemas) {
+  meta.clear();
+  const rows = [['sheet', 'header', 'column', 'letter']];
+
+  for (const sheetName in schemas) {
+    const headers = schemas[sheetName];
+    headers.forEach((h, i) => {
+      const col = i + 1;
+      rows.push([sheetName, h, col, OMS_Utils.columnLetter_(col)]);
+    });
+  }
+
+  meta.getRange(1, 1, rows.length, 4).setValues(rows);
+  meta.getRange(1, 1, 1, 4).setFontWeight('bold').setBackground('#efefef');
 }
 
 /**
@@ -297,13 +323,15 @@ function buildDashboard_(sheet) {
   sheet.getRange(4,3).setValue('Notes').setFontWeight('bold');
   sheet.getRange(4,1,1,3).setBackground('#EFEFEF');
 
-  // These formulas assume:
-  // Inbound purchase-date is column C
-  // Outbound hub-received-date is column I, us-ship-date is column L, delivered-date is column M
-  // (This is true with the schemas in this file.)
-
   const IN = OMS_CONFIG.TABS.INBOUND;
   const OUT = OMS_CONFIG.TABS.OUTBOUND;
+  const META = OMS_CONFIG.TABS.META;
+
+  // Helper for meta-based range
+  const metaRng = (s, h) => `INDIRECT("'"&${IN}!A1&"'!"&VLOOKUP("${s}|${h}",{${META}!A:A&"|"&${META}!B:B,${META}!D:D},2,FALSE)&":"&VLOOKUP("${s}|${h}",{${META}!A:A&"|"&${META}!B:B,${META}!D:D},2,FALSE))`.replace(`${IN}!A1`, `"${s}"`);
+
+  // Actually, Apps Script string templates are easier. Let's use a function.
+  const col_ = (s, h) => `INDIRECT("'"&"${s}"&"'!"&VLOOKUP("${s}|${h}", {${META}!$A$1:$A&"|"&${META}!$B$1:$B, ${META}!$D$1:$D}, 2, FALSE)&":"&VLOOKUP("${s}|${h}", {${META}!$A$1:$A&"|"&${META}!$B$1:$B, ${META}!$D$1:$D}, 2, FALSE))`;
 
   // Week / month anchors
   sheet.getRange('E4').setValue('WeekStart');
@@ -314,30 +342,56 @@ function buildDashboard_(sheet) {
   let r = 6;
 
   // Weekly & Monthly inbound/outbound
-  putMetric_(sheet, r++, 'Inbound Items (This Week)', `=COUNTIFS(${IN}!C:C,">="&$F$4,${IN}!C:C,"<"&$F$4+7)`, '');
-  putMetric_(sheet, r++, 'Inbound Items (This Month)', `=COUNTIFS(${IN}!C:C,">="&$F$5,${IN}!C:C,"<"&EOMONTH(TODAY(),0)+1)`, '');
-  putMetric_(sheet, r++, 'Outbound US Shipped (This Week)', `=COUNTIFS(${OUT}!L:L,">="&$F$4,${OUT}!L:L,"<"&$F$4+7)`, '');
-  putMetric_(sheet, r++, 'Delivered (This Week)', `=COUNTIFS(${OUT}!M:M,">="&$F$4,${OUT}!M:M,"<"&$F$4+7)`, '');
+  const inPurchaseDate = col_(IN, 'purchase-date');
+  putMetric_(sheet, r++, 'Inbound Items (This Week)', `=COUNTIFS(${inPurchaseDate},">="&$F$4,${inPurchaseDate},"<"&$F$4+7)`, '');
+  putMetric_(sheet, r++, 'Inbound Items (This Month)', `=COUNTIFS(${inPurchaseDate},">="&$F$5,${inPurchaseDate},"<"&EOMONTH(TODAY(),0)+1)`, '');
+
+  const outUsShipDate = col_(OUT, 'us-ship-date');
+  putMetric_(sheet, r++, 'Outbound US Shipped (This Week)', `=COUNTIFS(${outUsShipDate},">="&$F$4,${outUsShipDate},"<"&$F$4+7)`, '');
+
+  const outDeliveredDate = col_(OUT, 'delivered-date');
+  putMetric_(sheet, r++, 'Delivered (This Week)', `=COUNTIFS(${outDeliveredDate},">="&$F$4,${outDeliveredDate},"<"&$F$4+7)`, '');
 
   r++;
 
   // Logistics Velocity
-  putMetric_(sheet, r++, 'Avg Time to Hub (days)', `=IFERROR(AVERAGE(FILTER(${OUT}!I:I-${IN}!C:C, (${OUT}!I:I<>"")*(${IN}!C:C<>""))),"")`, 'purchase-date → hub-received-date');
-  putMetric_(sheet, r++, 'Avg Customs Clearance (days)', `=IFERROR(AVERAGE(FILTER(${OUT}!L:L-${OUT}!I:I, (${OUT}!L:L<>"")*(${OUT}!I:I<>""))),"")`, 'hub → us-ship');
-  putMetric_(sheet, r++, 'Avg Last Mile (days)', `=IFERROR(AVERAGE(FILTER(${OUT}!M:M-${OUT}!L:L, (${OUT}!M:M<>"")*(${OUT}!L:L<>""))),"")`, 'us-ship → delivered');
-  putMetric_(sheet, r++, 'Avg Click-to-Door (days)', `=IFERROR(AVERAGE(FILTER(${OUT}!M:M-${IN}!C:C, (${OUT}!M:M<>"")*(${IN}!C:C<>""))),"")`, 'purchase → delivered');
+  const outHubDate = col_(OUT, 'hub-received-date');
+  putMetric_(sheet, r++, 'Avg Time to Hub (days)', `=IFERROR(AVERAGE(FILTER(${outHubDate}-${inPurchaseDate}, (${outHubDate}<>"")*(${inPurchaseDate}<>""))),"")`, 'purchase-date → hub-received-date');
+  putMetric_(sheet, r++, 'Avg Customs Clearance (days)', `=IFERROR(AVERAGE(FILTER(${outUsShipDate}-${outHubDate}, (${outUsShipDate}<>"")*(${outHubDate}<>""))),"")`, 'hub → us-ship');
+  putMetric_(sheet, r++, 'Avg Last Mile (days)', `=IFERROR(AVERAGE(FILTER(${outDeliveredDate}-${outUsShipDate}, (${outDeliveredDate}<>"")*(${outUsShipDate}<>""))),"")`, 'us-ship → delivered');
+  putMetric_(sheet, r++, 'Avg Click-to-Door (days)', `=IFERROR(AVERAGE(FILTER(${outDeliveredDate}-${inPurchaseDate}, (${outDeliveredDate}<>"")*(${inPurchaseDate}<>""))),"")`, 'purchase → delivered');
 
   r++;
 
   // Backlog Monitor
-  putMetric_(sheet, r++, 'Hub Backlog', `=COUNTIFS(${OUT}!H:H,"<>",${OUT}!J:J,"")`, 'KR tracking present, US tracking empty');
-  putMetric_(sheet, r++, 'S/N Mismatch Count', `=COUNTIF(${OUT}!P:P,"MISMATCH")`, '');
+  const outKrTracking = col_(OUT, 'domestic-tracking-kr');
+  const outUsTracking = col_(OUT, 'international-tracking-us');
+  putMetric_(sheet, r++, 'Hub Backlog', `=COUNTIFS(${outKrTracking},"<>",${outUsTracking},"")`, 'KR tracking present, US tracking empty');
+
+  const snVerify = col_(OUT, 'sn-verify');
+  putMetric_(sheet, r++, 'S/N Mismatch Count', `=COUNTIF(${snVerify},"MISMATCH")`, '');
 
   r++;
 
   // -RES / Refunds
-  putMetric_(sheet, r++, 'Reshipment Rate (%)', `=IFERROR(COUNTIF(${IN}!A:A,"*"&"${OMS_CONFIG.RESHIP_SUFFIX}"&"*")/MAX(1,COUNTA(${IN}!A:A)-1),"")`, '');
-  putMetric_(sheet, r++, 'Total Lost Revenue', `=IFERROR(SUM(${IN}!AG:AG),0)`, 'Sum refund-amount');
+  const inOrderId = col_(IN, 'merchant-order-id');
+  const reshipPattern = `"*${OMS_CONFIG.RESHIP_SUFFIX}*"`;
+  putMetric_(sheet, r++, 'Reshipment Rate (%)', `=IFERROR(COUNTIF(${inOrderId}, ${reshipPattern})/MAX(1,COUNTA(${inOrderId})-1),"")`, '');
+
+  const inRefundAmount = col_(IN, 'refund-amount');
+  putMetric_(sheet, r++, 'Total Lost Revenue', `=IFERROR(SUM(${inRefundAmount}),0)`, 'Sum refund-amount');
+
+  r++;
+
+  // More detailed metrics
+  const buyerEmail = col_(IN, 'buyer-email');
+  putMetric_(sheet, r++, 'Repeat Purchase Rate (%)', `=IFERROR((COUNTA(${buyerEmail})-1-COUNTUNIQUE(${buyerEmail}))/(COUNTA(${buyerEmail})-1),"")`, 'Total items - unique emails / total items');
+
+  const totalAmount = col_(IN, 'total-amount');
+  putMetric_(sheet, r++, 'Total LTV', `=SUM(${totalAmount})`, 'Sum of total-amount across all orders');
+
+  const returnReason = col_(IN, 'return-reason-code');
+  putMetric_(sheet, r++, 'Top Return Reason', `=IFERROR(INDEX(${returnReason}, MATCH(MAX(COUNTIF(${returnReason}, ${returnReason})), COUNTIF(${returnReason}, ${returnReason}), 0)), "")`, 'Most frequent return reason');
 
   // Cosmetics
   sheet.setColumnWidth(1, 320);

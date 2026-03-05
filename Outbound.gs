@@ -30,6 +30,42 @@ function outbound_onEdit(e) {
 
   // Hub trigger gate: ONLY when international-tracking-us updated
   if (col === intlCol) outbound_sendFinalDeliveryEmail_(row);
+
+  // Velocity Automation: set status based on dates
+  outbound_updateStatusFromDates_(sheet, row, cols, col);
+}
+
+/**
+ * Velocity Metrics Automation
+ * When hub-received-date filled → outbound-status = HUB_RECEIVED
+ * When us-ship-date filled → outbound-status = US_SHIPPED
+ * When delivered-date filled → outbound-status = DELIVERED
+ */
+function outbound_updateStatusFromDates_(sheet, row, cols, editedCol) {
+  const hubDateCol = OMS_Utils.col_(cols, 'hub-received-date');
+  const usDateCol = OMS_Utils.col_(cols, 'us-ship-date');
+  const delDateCol = OMS_Utils.col_(cols, 'delivered-date');
+  const statusCol = OMS_Utils.col_(cols, 'outbound-status');
+
+  if (!statusCol) return;
+  if (editedCol !== hubDateCol && editedCol !== usDateCol && editedCol !== delDateCol) return;
+
+  const hubDate = sheet.getRange(row, hubDateCol).getValue();
+  const usDate = sheet.getRange(row, usDateCol).getValue();
+  const delDate = sheet.getRange(row, delDateCol).getValue();
+
+  let newStatus = '';
+  if (delDate) {
+    newStatus = 'DELIVERED';
+  } else if (usDate) {
+    newStatus = 'US_SHIPPED';
+  } else if (hubDate) {
+    newStatus = 'HUB_RECEIVED';
+  }
+
+  if (newStatus) {
+    sheet.getRange(row, statusCol).setValue(newStatus);
+  }
 }
 
 function outbound_linkifyRow_(sheet, row, cols) {
