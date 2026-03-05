@@ -8,9 +8,6 @@
 function omsSetupSheet() {
   const ss = OMS_Utils.ss();
 
-  // Validate on startup
-  validateSchema(ss);
-
   const inbound = getOrCreateSheet_(ss, OMS_CONFIG.TABS.INBOUND);
   const outbound = getOrCreateSheet_(ss, OMS_CONFIG.TABS.OUTBOUND);
   const dashboard = getOrCreateSheet_(ss, OMS_CONFIG.TABS.DASHBOARD);
@@ -43,6 +40,9 @@ function omsSetupSheet() {
   outbound.setTabColor('#047857');
   dashboard.setTabColor('#111827');
   masterTable.setTabColor('#374151');
+
+  // Validate after setup/repair
+  validateSchema(ss);
 
   SpreadsheetApp.flush();
 }

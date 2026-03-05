@@ -53,7 +53,10 @@ function test_migrationHelpers() {
   if (migrate_parsePhone_('="3104302093"') !== '+1-310-430-2093') console.error('test_migrationHelpers Phone 1 FAILED');
 
   // Date
-  if (migrate_parseDate_('02/17/2026') !== '2026-02-17') console.error('test_migrationHelpers Date 1 FAILED');
+  const d1 = migrate_parseDate_('02/17/2026');
+  if (!d1 || d1.getFullYear() !== 2026 || d1.getMonth() !== 1 || d1.getDate() !== 17) {
+    console.error('test_migrationHelpers Date 1 FAILED', d1);
+  }
 
   // Completion Date
   const cd1 = migrate_parseCompletionDate_('Wednesday, 2/25/26 at 11:55 AM');

@@ -22,17 +22,13 @@ function migrate_parsePhone_(val) {
 }
 
 /**
- * Parses MM/DD/YYYY into YYYY-MM-DD string.
+ * Parses MM/DD/YYYY into real Date object.
  */
 function migrate_parseDate_(val) {
   const s = String(val || '').trim();
-  if (!s) return '';
+  if (!s) return null;
   const d = new Date(s);
-  if (isNaN(d.getTime())) return '';
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
+  return isNaN(d.getTime()) ? null : d;
 }
 
 /**
@@ -58,6 +54,7 @@ function migrate_parseCompletionDate_(val) {
  */
 function migrateInboundLegacyToNew() {
   const ss = OMS_Utils.ss();
+  validateSchema(ss);
   const rawSheet = ss.getSheetByName('Inbound_Legacy_Raw');
   if (!rawSheet) {
     SpreadsheetApp.getUi().alert('Staging sheet "Inbound_Legacy_Raw" not found.');
@@ -115,6 +112,8 @@ function migrateInboundLegacyToNew() {
     const customerId = String(row[1] || '').trim() || OMS_Utils.lookupOrCreateCustomerId_(buyerEmail);
     const emailHash = OMS_Utils.emailHash_(buyerEmail);
 
+    const orderCreatedAt = purchaseDate ? Utilities.formatDate(purchaseDate, OMS_CONFIG.TZ, "yyyy-MM-dd'T'00:00:00") : '';
+
     const model = String(row[17] || '').toUpperCase().includes('S') ? 'Pro' : 'Basic';
     const hand = String(row[20] || '').trim();
     const flex = String(row[17] || '').trim();
@@ -138,7 +137,7 @@ function migrateInboundLegacyToNew() {
       lineItemIndex,
       purchaseDate,
       purchaseTime: '',
-      orderCreatedAt: purchaseDate ? `${purchaseDate}T00:00:00` : '',
+      orderCreatedAt,
 
       buyerEmail,
       buyerName: String(row[30] || '').trim() || (String(row[4] || '') + ' ' + String(row[5] || '')).trim(),
@@ -227,6 +226,7 @@ function migrateInboundLegacyToNew() {
  */
 function migrateOutboundLegacyToNew() {
   const ss = OMS_Utils.ss();
+  validateSchema(ss);
   const rawSheet = ss.getSheetByName('Outbound_Legacy_Raw');
   if (!rawSheet) {
     SpreadsheetApp.getUi().alert('Staging sheet "Outbound_Legacy_Raw" not found.');
