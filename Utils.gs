@@ -42,7 +42,9 @@ var OMS_Utils = {
    * Header Utilities
    ********************************/
   getHeadersMap_(sheet) {
-    const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn())
+    const lc = sheet.getLastColumn();
+    if (lc === 0) return {};
+    const headers = sheet.getRange(1, 1, 1, lc)
       .getValues()[0]
       .map(h => String(h || '').trim().toLowerCase());
 

@@ -19,9 +19,10 @@ function omsSetupSheet() {
   // IMPORTANT:
   // Inbound/Outbound get filters (table sheets)
   // Master dashboard gets NO filter (merge-safe)
-  applyHeaderRow_(inbound, OMS_SCHEMA_INBOUND_(), { createFilter: true, clearAll: true });
-  applyHeaderRow_(outbound, OMS_SCHEMA_OUTBOUND_(), { createFilter: true, clearAll: true });
-  applyHeaderRow_(master, OMS_SCHEMA_MASTER_(), { createFilter: false, clearAll: true }); // ✅ FIX
+  // clearAll = false to preserve manual data while adding missing schema columns.
+  applyHeaderRow_(inbound, OMS_SCHEMA_INBOUND_(), { createFilter: true, clearAll: false });
+  applyHeaderRow_(outbound, OMS_SCHEMA_OUTBOUND_(), { createFilter: true, clearAll: false });
+  applyHeaderRow_(master, OMS_SCHEMA_MASTER_(), { createFilter: false, clearAll: true }); // Dashboard can be cleared
 
   updateMetaSheet_(ss, meta, {
     [OMS_CONFIG.TABS.INBOUND]: OMS_SCHEMA_INBOUND_(),
@@ -113,11 +114,30 @@ function validateSchema(ss) {
   // Validate Inbound
   const inbound = ss.getSheetByName(OMS_CONFIG.TABS.INBOUND);
   if (inbound) {
-    const required = ['merchant-order-id','buyer-email','sku','oms-order-item-id'];
+    const required = [
+      'merchant-order-id','buyer-email','sku','oms-order-item-id',
+      'line-item-index','order-created-at','order-source-email','product-category',
+      'shaft-length-option','discount-amount','buyer-email-hash'
+    ];
     try {
       OMS_Utils.requireCols_(inbound, required);
     } catch (e) {
       throw new Error(`CRITICAL: Inbound sheet schema validation failed. ${e.message}`);
+    }
+  }
+
+  // Validate Outbound
+  const outbound = ss.getSheetByName(OMS_CONFIG.TABS.OUTBOUND);
+  if (outbound) {
+    const required = [
+      'oms-order-item-id','shipment-id','outbound-status','stage-timeline',
+      'order-created-at','delivery-country','package-type',
+      'actual-weight-kg','package-length-cm','package-width-cm','package-height-cm'
+    ];
+    try {
+      OMS_Utils.requireCols_(outbound, required);
+    } catch (e) {
+      throw new Error(`CRITICAL: Outbound sheet schema validation failed. ${e.message}`);
     }
   }
 }
@@ -144,6 +164,7 @@ function updateMetaSheet_(ss, meta, schemas) {
 /**
  * ✅ FIX: Always remove an existing filter BEFORE doing any merges later.
  * ✅ Master sheet: createFilter=false so dashboard merges are always allowed.
+ * Logic: If columns missing, append. Never overwrite existing columns.
  */
 function applyHeaderRow_(sheet, headers, options) {
   const opts = options || {};
@@ -154,22 +175,34 @@ function applyHeaderRow_(sheet, headers, options) {
   const existing = sheet.getFilter();
   if (existing) existing.remove();
 
-  if (clearAll) sheet.clear();
+  if (clearAll) {
+    sheet.clear();
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+  } else {
+    // Check which headers are missing
+    const currentMap = OMS_Utils.getHeadersMap_(sheet);
+    const missing = headers.filter(h => !currentMap[h.toLowerCase()]);
+    if (missing.length) {
+      sheet.getRange(1, sheet.getLastColumn() + 1, 1, missing.length).setValues([missing]);
+    }
+  }
 
-  sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
   sheet.setFrozenRows(1);
 
-  sheet.getRange(1, 1, 1, headers.length)
-    .setFontWeight('bold')
-    .setBackground('#111827')
-    .setFontColor('#FFFFFF')
-    .setWrap(true)
-    .setVerticalAlignment('middle');
+  const lastCol = sheet.getLastColumn();
+  if (lastCol > 0) {
+    sheet.getRange(1, 1, 1, lastCol)
+      .setFontWeight('bold')
+      .setBackground('#111827')
+      .setFontColor('#FFFFFF')
+      .setWrap(true)
+      .setVerticalAlignment('middle');
 
-  sheet.setRowHeight(1, 36);
+    sheet.setRowHeight(1, 36);
 
-  if (createFilter) {
-    sheet.getRange(1, 1, 1, headers.length).createFilter();
+    if (createFilter) {
+      sheet.getRange(1, 1, 1, lastCol).createFilter();
+    }
   }
 }
 
@@ -185,12 +218,14 @@ function styleInbound_(sheet) {
   setColWidth_(sheet, map, 'oms-order-id', 220);
   setColWidth_(sheet, map, 'oms-order-item-id', 260);
   setColWidth_(sheet, map, 'buyer-email', 220);
-  setColWidth_(sheet, map, 'buyer-email-hash', 240);
+  setColWidth_(sheet, map, 'buyer-email-hash', 250);
   setColWidth_(sheet, map, 'ship-address-1', 280);
   setColWidth_(sheet, map, 'sku', 160);
   setColWidth_(sheet, map, 'product-name', 220);
-  setColWidth_(sheet, map, 'order-created-at', 180);
+  setColWidth_(sheet, map, 'order-created-at', 150);
   setColWidth_(sheet, map, 'order-source-email', 220);
+  setColWidth_(sheet, map, 'product-category', 140);
+  setColWidth_(sheet, map, 'discount-amount', 120);
   setColWidth_(sheet, map, 'notes', 260);
   setColWidth_(sheet, map, 'automation-notes', 260);
 
@@ -291,11 +326,13 @@ function styleOutbound_(sheet) {
 
   setColWidth_(sheet, map, 'oms-order-id', 220);
   setColWidth_(sheet, map, 'oms-order-item-id', 260);
+  setColWidth_(sheet, map, 'shipment-id', 320);
   setColWidth_(sheet, map, 'order-created-at', 180);
   setColWidth_(sheet, map, 'domestic-tracking-kr', 180);
   setColWidth_(sheet, map, 'international-tracking-us', 200);
   setColWidth_(sheet, map, 'notes', 260);
-  setColWidth_(sheet, map, 'stage-timeline', 260);
+  setColWidth_(sheet, map, 'stage-timeline', 350);
+  setColWidth_(sheet, map, 'package-type', 140);
   setColWidth_(sheet, map, 'actual-weight-kg', 120);
   setColWidth_(sheet, map, 'package-length-cm', 140);
   setColWidth_(sheet, map, 'package-width-cm', 140);
