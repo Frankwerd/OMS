@@ -65,6 +65,14 @@ function test_parseGlobalAddress() {
       expected: { addr1: 'Rue de la Paix 1', city: 'Paris', zip: '75002', country: 'France', success: true }
     },
     {
+      input: ['123 Austin Way', 'Austin Texas 78701', 'USA'],
+      expected: { addr1: '123 Austin Way', city: 'Austin', state: 'TX', zip: '78701', country: 'United States', success: true }
+    },
+    {
+      input: ['456 Reversed Rd', '90210 Beverly Hills CA', 'USA'],
+      expected: { addr1: '456 Reversed Rd', city: 'Beverly Hills', state: 'CA', zip: '90210', country: 'United States', success: true }
+    },
+    {
       input: ['Invalid address block no geo info'],
       expected: { addr1: 'Invalid address block no geo info', success: false }
     }

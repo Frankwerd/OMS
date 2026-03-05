@@ -289,11 +289,27 @@ var OMS_Utils = {
     // 2. Parse Geo (now last line)
     const geo = working.pop();
 
-    // US/Canada Pattern: "City, State Zip" or "City State Zip" (Exactly 2-letter state)
-    const usCaMatch = geo.match(/^(.*?)[,\s]+([A-Z]{2})\s+(\d{5}(?:-\d{4})?|[A-Z]\d[A-Z]\s*\d[A-Z]\d)$/i);
-    if (usCaMatch) {
+    // Robust US/Canada Pattern
+    // 1. "City, State Zip" or "City State Zip" (2-letter state)
+    let usCaMatch = geo.match(/^(.*?)[,\s]+([A-Z]{2})\s+(\d{5}(?:-\d{4})?|[A-Z]\d[A-Z]\s*\d[A-Z]\d)$/i);
+    if (!usCaMatch) {
+      // 2. Full State Name: "City, StateName Zip"
+      usCaMatch = geo.match(/^(.*?)[,\s]+([A-Za-z\s]{3,20})\s+(\d{5}(?:-\d{4})?)$/i);
+    }
+    if (!usCaMatch) {
+      // 3. Reversed Zip: "Zip City State"
+      usCaMatch = geo.match(/^(\d{5}(?:-\d{4})?)\s+(.*?)[,\s]+([A-Z]{2})$/i);
+      if (usCaMatch) {
+        d.zip = usCaMatch[1].trim().toUpperCase();
+        d.city = usCaMatch[2].trim();
+        d.state = usCaMatch[3].trim().toUpperCase();
+        d.success = true;
+      }
+    }
+
+    if (!d.success && usCaMatch) {
       d.city = usCaMatch[1].trim();
-      d.state = usCaMatch[2].trim().toUpperCase();
+      d.state = this.mapStateToAbbr_(usCaMatch[2].trim());
       d.zip = usCaMatch[3].trim().toUpperCase();
       d.success = true;
     }
@@ -349,6 +365,15 @@ var OMS_Utils = {
     }
 
     return d;
+  },
+
+  mapStateToAbbr_(state) {
+    const s = String(state || '').trim().toUpperCase();
+    if (s.length === 2) return s;
+    const map = {
+      'ALABAMA': 'AL', 'ALASKA': 'AK', 'ARIZONA': 'AZ', 'ARKANSAS': 'AR', 'CALIFORNIA': 'CA', 'COLORADO': 'CO', 'CONNECTICUT': 'CT', 'DELAWARE': 'DE', 'FLORIDA': 'FL', 'GEORGIA': 'GA', 'HAWAII': 'HI', 'IDAHO': 'ID', 'ILLINOIS': 'IL', 'INDIANA': 'IN', 'IOWA': 'IA', 'KANSAS': 'KS', 'KENTUCKY': 'KY', 'LOUISIANA': 'LA', 'MAINE': 'ME', 'MARYLAND': 'MD', 'MASSACHUSETTS': 'MA', 'MICHIGAN': 'MI', 'MINNESOTA': 'MN', 'MISSISSIPPI': 'MS', 'MISSOURI': 'MO', 'MONTANA': 'MT', 'NEBRASKA': 'NE', 'NEVADA': 'NV', 'NEW HAMPSHIRE': 'NH', 'NEW JERSEY': 'NJ', 'NEW MEXICO': 'NM', 'NEW YORK': 'NY', 'NORTH CAROLINA': 'NC', 'NORTH DAKOTA': 'ND', 'OHIO': 'OH', 'OKLAHOMA': 'OK', 'OREGON': 'OR', 'PENNSYLVANIA': 'PA', 'RHODE ISLAND': 'RI', 'SOUTH CAROLINA': 'SC', 'SOUTH DAKOTA': 'SD', 'TENNESSEE': 'TN', 'TEXAS': 'TX', 'UTAH': 'UT', 'VERMONT': 'VT', 'VIRGINIA': 'VA', 'WASHINGTON': 'WA', 'WEST VIRGINIA': 'WV', 'WISCONSIN': 'WI', 'WYOMING': 'WY'
+    };
+    return map[s] || s;
   },
 
   normalizeDateYYYYMMDD(dateStr) {

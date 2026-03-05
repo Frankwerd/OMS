@@ -5,9 +5,16 @@ const OMS_CONFIG = {
   // Standalone script: REQUIRED
   SPREADSHEET_ID: '1I7l8LrFjdNQePw5gcVBiSoKAm3RdX9wqmUbHVFV4tuA',
 
-  SCHEMA_VERSION: '1.1.0',
+  SCHEMA_VERSION: '1.2.0',
 
   TZ: Session.getScriptTimeZone(),
+
+  PACKAGE_DEFAULTS: {
+    WEIGHT_KG: 1.5,
+    WIDTH_CM: 106,
+    LENGTH_CM: 16.5,
+    HEIGHT_CM: 8.5,
+  },
 
   ERRORS: {
     MISSING_ORDER_ID: 'ERR_NO_ORDER_ID',

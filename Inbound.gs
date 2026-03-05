@@ -56,6 +56,7 @@ function inbound_runShopify() {
         const stamp = Utilities.formatDate(now, OMS_CONFIG.TZ, 'yyyy-MM-dd HH:mm:ss');
 
         const rows = [];
+        const stubData = [];
         parsed.items.forEach((it, idx) => {
           const sourceOrderItemId = it.itemId || OMS_Utils.generateLineItemId_(idx + 1);
           const omsOrderItemId = OMS_Utils.buildOmsOrderItemId_(omsOrderId, sourceOrderItemId);
@@ -123,6 +124,16 @@ function inbound_runShopify() {
             omsOrderItemId,
             buyerEmailHash: emailHash,
           }));
+
+          stubData.push({
+            merchantOrderId: sourceOrderId,
+            merchantOrderItemId: sourceOrderItemId,
+            sku: it.sku || 'SHOPIFY-UNMAPPED',
+            customerId,
+            omsOrderId,
+            omsOrderItemId,
+            magSafeStand: it.magSafeStand,
+          });
         });
 
         if (!rows.length) throw new Error('No items parsed from Shopify order.');
@@ -130,6 +141,9 @@ function inbound_runShopify() {
         inbound.getRange(inbound.getLastRow() + 1, 1, rows.length, rows[0].length)
           .setNumberFormat('@')
           .setValues(rows);
+
+        // Create Outbound stubs
+        outbound_createStubs_(stubData);
 
         existing.add(msgId);
 
@@ -213,7 +227,7 @@ function inbound_parseShopifyOrder_(text) {
       quantity: qty,
       price: price,
       model: rawName.toUpperCase().includes('PRO') ? 'Pro' : 'Basic',
-      clubType: rawName.toUpperCase().includes('WOOD') ? 'Wood' : 'Iron',
+      clubType: rawName.toUpperCase().includes('WOOD') ? 'Wood' : (rawName.toUpperCase().includes('IRON') ? 'Iron' : '7-iron'),
       hand: rawName.toUpperCase().includes('LEFT') ? 'Left' : 'Right',
       flex: rawName.toUpperCase().includes('L-FLEX') ? 'L' : (rawName.toUpperCase().includes('S-FLEX') ? 'S' : 'R'),
       length: rawName.toUpperCase().includes('LONGER') ? 'Longer' : 'Standard',
@@ -293,6 +307,7 @@ function inbound_runImweb() {
         const stamp = Utilities.formatDate(now, OMS_CONFIG.TZ, 'yyyy-MM-dd HH:mm:ss');
 
         const rows = [];
+        const stubData = [];
         parsed.items.forEach((it, idx) => {
           const sourceOrderItemId = it.itemId || OMS_Utils.generateLineItemId_(idx + 1);
           const omsOrderItemId = OMS_Utils.buildOmsOrderItemId_(omsOrderId, sourceOrderItemId);
@@ -346,6 +361,16 @@ function inbound_runImweb() {
             omsOrderItemId,
             buyerEmailHash: emailHash,
           }));
+
+          stubData.push({
+            merchantOrderId: sourceOrderId,
+            merchantOrderItemId: sourceOrderItemId,
+            sku: it.sku || 'IMWEB-UNMAPPED',
+            customerId,
+            omsOrderId,
+            omsOrderItemId,
+            magSafeStand: it.magSafeStand,
+          });
         });
 
         if (!rows.length) throw new Error('No items parsed from Imweb order.');
@@ -353,6 +378,9 @@ function inbound_runImweb() {
         inbound.getRange(inbound.getLastRow() + 1, 1, rows.length, rows[0].length)
           .setNumberFormat('@')
           .setValues(rows);
+
+        // Create Outbound stubs
+        outbound_createStubs_(stubData);
 
         existing.add(msgId);
       } catch (err) {
@@ -428,7 +456,7 @@ function inbound_parseImwebOrder_(text) {
       productName: prodName,
       quantity: qty,
       model: prodName.toUpperCase().includes('PRO') ? 'Pro' : 'Basic',
-      clubType: optStr.includes('WOOD') ? 'Wood' : 'Iron',
+      clubType: optStr.includes('WOOD') ? 'Wood' : (optStr.includes('IRON') ? 'Iron' : '7-iron'),
       hand: optStr.includes('LEFT') ? 'Left' : 'Right',
       flex: optStr.includes('L-FLEX') ? 'L' : (optStr.includes('S-FLEX') ? 'S' : 'R'),
       length: optStr.includes('LONGER') ? 'Longer' : 'Standard',
@@ -505,6 +533,7 @@ function inbound_runSamCart() {
         const stamp = Utilities.formatDate(now, OMS_CONFIG.TZ, 'yyyy-MM-dd HH:mm:ss');
 
         const rows = [];
+        const stubData = [];
         parsed.items.forEach((it, idx) => {
           const sourceOrderItemId = OMS_Utils.generateLineItemId_(idx + 1);
           const omsOrderItemId = OMS_Utils.buildOmsOrderItemId_(omsOrderId, sourceOrderItemId);
@@ -581,6 +610,16 @@ function inbound_runSamCart() {
             omsOrderItemId,
             buyerEmailHash: emailHash,
           }));
+
+          stubData.push({
+            merchantOrderId: sourceOrderId,
+            merchantOrderItemId: sourceOrderItemId,
+            sku: it.sku,
+            customerId,
+            omsOrderId,
+            omsOrderItemId,
+            magSafeStand: it.magSafeStand,
+          });
         });
 
         if (!rows.length) throw new Error('No items parsed from SamCart invoice.');
@@ -588,6 +627,9 @@ function inbound_runSamCart() {
         inbound.getRange(inbound.getLastRow() + 1, 1, rows.length, rows[0].length)
           .setNumberFormat('@')
           .setValues(rows);
+
+        // Create Outbound stubs
+        outbound_createStubs_(stubData);
 
         existing.add(msgId);
 
@@ -685,7 +727,7 @@ function inbound_parseSamCartInvoice_(text) {
 
   // Specs (same as legacy)
   const model = u.includes('PRO') ? 'Pro' : 'Basic';
-  const clubType = u.includes('WOOD') ? 'Wood' : 'Iron';
+  const clubType = u.includes('WOOD') ? 'Wood' : (u.includes('IRON') ? 'Iron' : '7-iron');
   const flex = (u.includes('L-FLEX') || u.includes('LADIE')) ? 'L' : (u.includes('R-FLEX') || u.includes('REGULAR')) ? 'R' : 'S';
   const gripSize = (u.includes('MIDSIZE') || u.includes('MID SIZE')) ? 'Mid' : 'Standard';
   const length = u.includes('LONGER') ? 'Longer' : 'Standard';

@@ -67,13 +67,15 @@ function OMS_SCHEMA_INBOUND_() {
 
 function OMS_SCHEMA_OUTBOUND_() {
   // Added: us-ship-date, delivered-date (needed for velocity metrics)
+  // Added: package weight/dims for outbound stub creation
   return [
     'merchant-order-id','merchant-order-item-id','sku','customer-id','outbound-workflow-type',
     'original-merchant-order-id','original-merchant-order-item-id',
     'domestic-tracking-kr','hub-received-date','international-tracking-us','carrier-us',
     'us-ship-date','delivered-date',
     'outbound-status','serial-number-scanned','sn-verify','customer-email-status','last-email-at','system-updated-at','notes',
-    'oms-order-id','oms-order-item-id','shipment-id'
+    'oms-order-id','oms-order-item-id','shipment-id',
+    'actual-weight-kg','package-length-cm','package-width-cm','package-height-cm'
   ];
 }
 
@@ -287,12 +289,21 @@ function styleOutbound_(sheet) {
   setColWidth_(sheet, map, 'domestic-tracking-kr', 180);
   setColWidth_(sheet, map, 'international-tracking-us', 200);
   setColWidth_(sheet, map, 'notes', 260);
+  setColWidth_(sheet, map, 'actual-weight-kg', 120);
+  setColWidth_(sheet, map, 'package-length-cm', 140);
+  setColWidth_(sheet, map, 'package-width-cm', 140);
+  setColWidth_(sheet, map, 'package-height-cm', 140);
 
   setNumberFormat_(sheet, map, 'hub-received-date', 'yyyy-mm-dd');
   setNumberFormat_(sheet, map, 'us-ship-date', 'yyyy-mm-dd');
   setNumberFormat_(sheet, map, 'delivered-date', 'yyyy-mm-dd');
   setNumberFormat_(sheet, map, 'last-email-at', 'yyyy-mm-dd hh:mm:ss');
   setNumberFormat_(sheet, map, 'system-updated-at', 'yyyy-mm-dd hh:mm:ss');
+
+  setNumberFormat_(sheet, map, 'actual-weight-kg', '0.00');
+  setNumberFormat_(sheet, map, 'package-length-cm', '0.00');
+  setNumberFormat_(sheet, map, 'package-width-cm', '0.00');
+  setNumberFormat_(sheet, map, 'package-height-cm', '0.00');
 
   applyDropdown_(sheet, map, 'carrier-us', ['FEDEX','UPS','USPS','DHL','OTHER','']);
   applyDropdown_(sheet, map, 'outbound-status', ['CREATED','KR_SHIPPED','HUB_RECEIVED','US_SHIPPED','DELIVERED','EXCEPTION','HOLD','CANCELLED','']);

@@ -68,6 +68,48 @@ function outbound_updateStatusFromDates_(sheet, row, cols, editedCol) {
   }
 }
 
+/**
+ * Create Outbound stubs for Inbound items
+ */
+function outbound_createStubs_(items) {
+  if (!items || !items.length) return;
+
+  const out = OMS_Utils.sheet_(OMS_CONFIG.TABS.OUTBOUND);
+  const cols = OMS_Utils.getHeadersMap_(out);
+
+  const rows = items.map(it => {
+    const row = new Array(out.getLastColumn()).fill('');
+
+    OMS_Utils.setByHeader_(row, cols, 'merchant-order-id', it.merchantOrderId);
+    OMS_Utils.setByHeader_(row, cols, 'merchant-order-item-id', it.merchantOrderItemId);
+    OMS_Utils.setByHeader_(row, cols, 'sku', it.sku);
+    OMS_Utils.setByHeader_(row, cols, 'customer-id', it.customerId);
+    OMS_Utils.setByHeader_(row, cols, 'outbound-workflow-type', 'DIRECT_SHIP');
+    OMS_Utils.setByHeader_(row, cols, 'outbound-status', 'CREATED');
+    OMS_Utils.setByHeader_(row, cols, 'oms-order-id', it.omsOrderId);
+    OMS_Utils.setByHeader_(row, cols, 'oms-order-item-id', it.omsOrderItemId);
+
+    // Package defaults based on stand
+    if (it.magSafeStand === 'Yes' || it.magSafeStand === '1') {
+      OMS_Utils.setByHeader_(row, cols, 'notes', 'Stand included: package dims TBD');
+    } else {
+      OMS_Utils.setByHeader_(row, cols, 'actual-weight-kg', OMS_CONFIG.PACKAGE_DEFAULTS.WEIGHT_KG);
+      OMS_Utils.setByHeader_(row, cols, 'package-length-cm', OMS_CONFIG.PACKAGE_DEFAULTS.LENGTH_CM);
+      OMS_Utils.setByHeader_(row, cols, 'package-width-cm', OMS_CONFIG.PACKAGE_DEFAULTS.WIDTH_CM);
+      OMS_Utils.setByHeader_(row, cols, 'package-height-cm', OMS_CONFIG.PACKAGE_DEFAULTS.HEIGHT_CM);
+    }
+
+    const stamp = Utilities.formatDate(new Date(), OMS_CONFIG.TZ, 'yyyy-MM-dd HH:mm:ss');
+    OMS_Utils.setByHeader_(row, cols, 'system-updated-at', stamp);
+
+    return row;
+  });
+
+  out.getRange(out.getLastRow() + 1, 1, rows.length, rows[0].length)
+    .setNumberFormat('@')
+    .setValues(rows);
+}
+
 function outbound_linkifyRow_(sheet, row, cols) {
   const domCol = OMS_Utils.col_(cols, 'domestic-tracking-kr');
   if (domCol) {
