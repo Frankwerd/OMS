@@ -211,6 +211,7 @@ function applyHeaderRow_(sheet, headers, options) {
 function styleInbound_(sheet) {
   sheet.setHiddenGridlines(false);
   sheet.getDataRange().setFontFamily('Arial').setFontSize(10).setVerticalAlignment('middle');
+  sheet.setFrozenColumns(6);
 
   const map = OMS_Utils.getHeadersMap_(sheet);
 
@@ -219,7 +220,7 @@ function styleInbound_(sheet) {
   setColWidth_(sheet, map, 'oms-order-item-id', 260);
   setColWidth_(sheet, map, 'buyer-email', 220);
   setColWidth_(sheet, map, 'buyer-email-hash', 250);
-  setColWidth_(sheet, map, 'ship-address-1', 280);
+  setColWidth_(sheet, map, 'ship-address-1', 300);
   setColWidth_(sheet, map, 'sku', 160);
   setColWidth_(sheet, map, 'product-name', 220);
   setColWidth_(sheet, map, 'order-created-at', 150);
@@ -256,19 +257,65 @@ function styleInbound_(sheet) {
   applyDropdown_(sheet, map, 'parse-status', ['OK','ERROR','RES_AUTO','MANUAL_EDIT','']);
   applyDropdown_(sheet, map, 'source-system', ['amazon_fba','shopify','samcart','imweb','manual','unknown','']);
 
+  // UI: Section Shading
+  const sections = [
+    { color: '#EEF2FF', headers: ['merchant-order-id','merchant-order-item-id','line-item-index','purchase-date','purchase-time','order-created-at','source-*','oms-*','system-gmail-id','order-source-email','buyer-email-hash','customer-id'] },
+    { color: '#ECFEFF', headers: ['buyer-email','buyer-name','buyer-phone-number','recipient-name'] },
+    { color: '#ECFDF5', headers: ['sku','product-name','product-category','model','club-type','hand','flex','shaft-length-option','grip-size','mag-safe-stand'] },
+    { color: '#FFFBEB', headers: ['currency','item-price','item-tax','shipping-price','discount-amount','refund-amount','total-amount', 'coupon-code'] },
+    { color: '#F5F3FF', headers: ['ship-address-1','ship-city','ship-state','ship-postal-code','ship-country','ship-service-level'] },
+    { color: '#FFF1F2', headers: ['serial-number-allocated','item-life-cycle','order-life-cycle','replacement-*','parse-status','notes','automation-notes'] }
+  ];
+  OMS_Utils.applySectionShading_(sheet, map, sections);
+
+  // Restore dark header readability
+  const lc = sheet.getLastColumn();
+  if (lc > 0) {
+    sheet.getRange(1, 1, 1, lc)
+      .setFontWeight('bold')
+      .setBackground('#111827')
+      .setFontColor('#FFFFFF');
+  }
+
+  // UI: Banding
+  OMS_Utils.applyBanding_(sheet);
+
   // conditional formatting to mimic “chips”
   sheet.setConditionalFormatRules([]);
   const rules = [];
+  const maxRows = sheet.getMaxRows();
+  const lastCol = sheet.getLastColumn();
 
-  // parse error row tint
+  // A) Parse failed (row highlight)
   if (map['parse-status']) {
-    const full = sheet.getRange(2, 1, sheet.getMaxRows()-1, sheet.getLastColumn());
-    rules.push(cfRowEquals_(full, map['parse-status'], 'ERROR', '#FDE2E2'));
+    const full = sheet.getRange(2, 1, maxRows - 1, lastCol);
+    rules.push(cfRowEquals_(full, map['parse-status'], 'ERROR', '#FEE2E2'));
   }
 
-  // refund tint
+  // B) Missing shipping address (cell highlight)
+  const addrFields = ['ship-address-1', 'ship-city', 'ship-state', 'ship-postal-code'];
+  const addrRanges = [];
+  addrFields.forEach(f => {
+    if (map[f]) addrRanges.push(sheet.getRange(2, map[f], maxRows - 1, 1));
+  });
+  if (addrRanges.length) {
+    rules.push(SpreadsheetApp.newConditionalFormatRule()
+      .whenCellEmpty()
+      .setBackground('#FCE7F3')
+      .setRanges(addrRanges).build());
+  }
+
+  // C) Missing customer-id
+  if (map['customer-id']) {
+    rules.push(SpreadsheetApp.newConditionalFormatRule()
+      .whenCellEmpty()
+      .setBackground('#FCA5A5')
+      .setRanges([sheet.getRange(2, map['customer-id'], maxRows - 1, 1)]).build());
+  }
+
+  // D) Refund present (row highlight)
   if (map['refund-amount']) {
-    const full = sheet.getRange(2, 1, sheet.getMaxRows()-1, sheet.getLastColumn());
+    const full = sheet.getRange(2, 1, maxRows - 1, lastCol);
     const c = OMS_Utils.columnLetter_(map['refund-amount']);
     rules.push(SpreadsheetApp.newConditionalFormatRule()
       .whenFormulaSatisfied(`=N($${c}2)>0`)
@@ -276,39 +323,54 @@ function styleInbound_(sheet) {
       .setRanges([full]).build());
   }
 
-  // customer classification colors (like your screenshot)
+  // E) Stand order alert
+  if (map['mag-safe-stand']) {
+    const c = OMS_Utils.columnLetter_(map['mag-safe-stand']);
+    rules.push(SpreadsheetApp.newConditionalFormatRule()
+      .whenFormulaSatisfied(`=$${c}2="Yes"`)
+      .setBackground('#FED7AA')
+      .setRanges([sheet.getRange(2, map['mag-safe-stand'], maxRows - 1, 1)]).build());
+  }
+
+  // F) Duplicate system-gmail-id
+  if (map['system-gmail-id']) {
+    const c = OMS_Utils.columnLetter_(map['system-gmail-id']);
+    rules.push(SpreadsheetApp.newConditionalFormatRule()
+      .whenFormulaSatisfied(`=COUNTIF($${c}:$${c}, $${c}2)>1`)
+      .setBackground('#FED7AA')
+      .setRanges([sheet.getRange(2, map['system-gmail-id'], maxRows - 1, 1)]).build());
+  }
+
+  // Existing: customer classification colors
   addChipRules_(rules, sheet, map, 'customer-classification', {
     'Active':   { bg:'#DBEAFE', fg:'#1D4ED8' },
     'Replaced': { bg:'#0F766E', fg:'#FFFFFF' },
     'Refunded': { bg:'#B91C1C', fg:'#FFFFFF' },
   });
 
-  // grip-size / length / hand (your screenshot vibe)
+  // Existing: grip-size / length / hand / model
   addChipRules_(rules, sheet, map, 'grip-size', {
     'Standard': { bg:'#D1E7F0', fg:'#0F4C5C' },
     'Mid':      { bg:'#FDE68A', fg:'#92400E' },
   });
-
   addChipRules_(rules, sheet, map, 'shaft-length-option', {
     'Standard': { bg:'#D1E7F0', fg:'#0F4C5C' },
     'Longer':   { bg:'#D9F99D', fg:'#166534' },
   });
-
   addChipRules_(rules, sheet, map, 'hand', {
     'Right': { bg:'#FDE68A', fg:'#92400E' },
     'Left':  { bg:'#D1E7F0', fg:'#0F4C5C' },
   });
-
   addChipRules_(rules, sheet, map, 'model', {
     'Pro':   { bg:'#E9D5FF', fg:'#6B21A8' },
     'Basic': { bg:'#E5E7EB', fg:'#111827' },
   });
 
-  // missing serial allocation cue (ACTIVE + empty)
+  // Existing: missing serial allocation cue (ACTIVE + empty)
   if (map['serial-number-allocated'] && map['item-life-cycle']) {
     const snCol = OMS_Utils.columnLetter_(map['serial-number-allocated']);
     const lifeCol = OMS_Utils.columnLetter_(map['item-life-cycle']);
-    const r = sheet.getRange(2, map['serial-number-allocated'], sheet.getMaxRows()-1, 1);
+    const r = sheet.getRange(2, map['serial-number-allocated'], maxRows - 1, 1);
     rules.push(SpreadsheetApp.newConditionalFormatRule()
       .whenFormulaSatisfied(`=AND($${lifeCol}2="ACTIVE",LEN($${snCol}2)=0)`)
       .setBackground('#FCE7F3')
@@ -321,6 +383,7 @@ function styleInbound_(sheet) {
 function styleOutbound_(sheet) {
   sheet.setHiddenGridlines(false);
   sheet.getDataRange().setFontFamily('Arial').setFontSize(10).setVerticalAlignment('middle');
+  sheet.setFrozenColumns(6);
 
   const map = OMS_Utils.getHeadersMap_(sheet);
 
@@ -331,7 +394,7 @@ function styleOutbound_(sheet) {
   setColWidth_(sheet, map, 'domestic-tracking-kr', 180);
   setColWidth_(sheet, map, 'international-tracking-us', 200);
   setColWidth_(sheet, map, 'notes', 260);
-  setColWidth_(sheet, map, 'stage-timeline', 350);
+  setColWidth_(sheet, map, 'stage-timeline', 450);
   setColWidth_(sheet, map, 'package-type', 140);
   setColWidth_(sheet, map, 'actual-weight-kg', 120);
   setColWidth_(sheet, map, 'package-length-cm', 140);
@@ -357,10 +420,100 @@ function styleOutbound_(sheet) {
   applyDropdown_(sheet, map, 'sn-verify', ['OK','MISMATCH','ERROR: No allocated S/N','']);
   applyDropdown_(sheet, map, 'customer-email-status', ['Sent: Final Delivery','Error','SKIP','']);
 
+  // UI: Section Shading
+  const sections = [
+    { color: '#EEF2FF', headers: ['merchant-order-id','merchant-order-item-id','sku','customer-id','oms-*','shipment-id'] },
+    { color: '#ECFEFF', headers: ['outbound-workflow-type','original-merchant-order-id','original-merchant-order-item-id'] },
+    { color: '#ECFDF5', headers: ['order-created-at','hub-received-date','us-ship-date','delivered-date','hub-location','delivery-country'] },
+    { color: '#FFFBEB', headers: ['domestic-tracking-kr','international-tracking-us','carrier-us'] },
+    { color: '#FFF1F2', headers: ['outbound-status','sn-verify','customer-email-status','stage-timeline','notes'] },
+    { color: '#F5F3FF', headers: ['package-type','actual-weight-kg','package-length-cm','package-width-cm','package-height-cm'] }
+  ];
+  OMS_Utils.applySectionShading_(sheet, map, sections);
+
+  // Restore dark header readability
+  const lc = sheet.getLastColumn();
+  if (lc > 0) {
+    sheet.getRange(1, 1, 1, lc)
+      .setFontWeight('bold')
+      .setBackground('#111827')
+      .setFontColor('#FFFFFF');
+  }
+
+  // UI: Banding
+  OMS_Utils.applyBanding_(sheet);
+
   sheet.setConditionalFormatRules([]);
   const rules = [];
+  const maxRows = sheet.getMaxRows();
+  const lastCol = sheet.getLastColumn();
 
-  // status chips
+  // A) Hub backlog (row orange)
+  if (map['domestic-tracking-kr'] && map['international-tracking-us']) {
+    const full = sheet.getRange(2, 1, maxRows - 1, lastCol);
+    const krCol = OMS_Utils.columnLetter_(map['domestic-tracking-kr']);
+    const usCol = OMS_Utils.columnLetter_(map['international-tracking-us']);
+    rules.push(SpreadsheetApp.newConditionalFormatRule()
+      .whenFormulaSatisfied(`=AND(LEN($${krCol}2)>0, LEN($${usCol}2)=0)`)
+      .setBackground('#FFEDD5')
+      .setRanges([full]).build());
+  }
+
+  // B) International tracking set but no us-ship-date
+  if (map['international-tracking-us'] && map['us-ship-date']) {
+    const usTrk = OMS_Utils.columnLetter_(map['international-tracking-us']);
+    const usDate = OMS_Utils.columnLetter_(map['us-ship-date']);
+    rules.push(SpreadsheetApp.newConditionalFormatRule()
+      .whenFormulaSatisfied(`=AND(LEN($${usTrk}2)>0, LEN($${usDate}2)=0)`)
+      .setBackground('#FED7AA')
+      .setRanges([sheet.getRange(2, map['us-ship-date'], maxRows - 1, 1)]).build());
+  }
+
+  // C) Delivered but missing date
+  if (map['outbound-status'] && map['delivered-date']) {
+    const full = sheet.getRange(2, 1, maxRows - 1, lastCol);
+    const statusCol = OMS_Utils.columnLetter_(map['outbound-status']);
+    const dateCol = OMS_Utils.columnLetter_(map['delivered-date']);
+    rules.push(SpreadsheetApp.newConditionalFormatRule()
+      .whenFormulaSatisfied(`=AND($${statusCol}2="DELIVERED", LEN($${dateCol}2)=0)`)
+      .setBackground('#FEE2E2')
+      .setRanges([full]).build());
+  }
+
+  // D) S/N mismatch (critical)
+  if (map['sn-verify']) {
+    const full = sheet.getRange(2, 1, maxRows - 1, lastCol);
+    const c = OMS_Utils.columnLetter_(map['sn-verify']);
+    rules.push(SpreadsheetApp.newConditionalFormatRule()
+      .whenFormulaSatisfied(`=OR($${c}2="MISMATCH", LEFT($${c}2, 5)="ERROR")`)
+      .setBackground('#FEE2E2')
+      .setRanges([full]).build());
+  }
+
+  // E) Email gate
+  if (map['customer-email-status']) {
+    const c = OMS_Utils.columnLetter_(map['customer-email-status']);
+    const range = sheet.getRange(2, map['customer-email-status'], maxRows - 1, 1);
+    rules.push(SpreadsheetApp.newConditionalFormatRule()
+      .whenFormulaSatisfied(`=SEARCH("Sent", $${c}2)`)
+      .setBackground('#DCFCE7')
+      .setRanges([range]).build());
+    rules.push(SpreadsheetApp.newConditionalFormatRule()
+      .whenFormulaSatisfied(`=AND(LEN($${c}2)=0, LEN(INDIRECT("R"&ROW()&"C"&${map['international-tracking-us']}, FALSE))>0)`)
+      .setBackground('#FEF3C7')
+      .setRanges([range]).build());
+  }
+
+  // F) Stage timeline missing
+  if (map['outbound-status'] && map['stage-timeline']) {
+    const sCol = OMS_Utils.columnLetter_(map['outbound-status']);
+    rules.push(SpreadsheetApp.newConditionalFormatRule()
+      .whenFormulaSatisfied(`=AND(LEN($${sCol}2)>0, LEN(INDIRECT("R"&ROW()&"C"&${map['stage-timeline']}, FALSE))=0)`)
+      .setBackground('#FCE7F3')
+      .setRanges([sheet.getRange(2, map['stage-timeline'], maxRows - 1, 1)]).build());
+  }
+
+  // Existing: status chips
   addChipRules_(rules, sheet, map, 'outbound-status', {
     'CREATED':      { bg:'#E5E7EB', fg:'#111827' },
     'KR_SHIPPED':   { bg:'#DBEAFE', fg:'#1D4ED8' },
@@ -371,16 +524,6 @@ function styleOutbound_(sheet) {
     'HOLD':         { bg:'#FCA5A5', fg:'#7F1D1D' },
     'CANCELLED':    { bg:'#9CA3AF', fg:'#111827' },
   });
-
-  // SN mismatch row tint
-  if (map['sn-verify']) {
-    const full = sheet.getRange(2, 1, sheet.getMaxRows()-1, sheet.getLastColumn());
-    const c = OMS_Utils.columnLetter_(map['sn-verify']);
-    rules.push(SpreadsheetApp.newConditionalFormatRule()
-      .whenFormulaSatisfied(`=OR($${c}2="MISMATCH",LEFT($${c}2,5)="ERROR")`)
-      .setBackground('#FDE2E2')
-      .setRanges([full]).build());
-  }
 
   sheet.setConditionalFormatRules(rules);
 }
