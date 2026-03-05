@@ -289,8 +289,8 @@ var OMS_Utils = {
     // 2. Parse Geo (now last line)
     const geo = working.pop();
 
-    // US/Canada Pattern: "City, State Zip" or "City State Zip"
-    const usCaMatch = geo.match(/^(.*?)[,\s]+([A-Z]{2})\s+([A-Z0-9\s\-]{3,10})$/i);
+    // US/Canada Pattern: "City, State Zip" or "City State Zip" (Exactly 2-letter state)
+    const usCaMatch = geo.match(/^(.*?)[,\s]+([A-Z]{2})\s+(\d{5}(?:-\d{4})?|[A-Z]\d[A-Z]\s*\d[A-Z]\d)$/i);
     if (usCaMatch) {
       d.city = usCaMatch[1].trim();
       d.state = usCaMatch[2].trim().toUpperCase();
@@ -308,13 +308,18 @@ var OMS_Utils = {
         d.city = geo;
       }
     }
-    // JP/KR Pattern: "Zip City State" or "Zip State City"
+    // JP/KR Pattern: "[Zip] City" or "City Zip" or "Zip City"
     else if (d.country === 'Japan' || d.country === 'South Korea') {
-      const eastMatch = geo.match(/^\[?(\d{3,7}[-\s]?\d{0,4})\]?\s*(.*)$/);
+      const eastMatch = geo.match(/^\[?(\d{3,7}[-\s]?\d{0,4})\]?\s*(.*)$/) || geo.match(/^(.*?)\s+(\d{3,7}[-\s]?\d{0,4})$/);
       if (eastMatch) {
-        d.zip = eastMatch[1].trim();
-        d.city = eastMatch[2].trim();
-        d.success = true;
+        if (isNaN(parseInt(eastMatch[1].charAt(0)))) { // Zip at end
+          d.city = eastMatch[1].trim();
+          d.zip = eastMatch[2].trim();
+        } else { // Zip at start
+          d.zip = eastMatch[1].trim();
+          d.city = eastMatch[2].trim();
+        }
+        d.success = (!!d.zip && !!d.city);
       } else {
         d.city = geo;
       }

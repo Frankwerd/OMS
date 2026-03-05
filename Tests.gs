@@ -74,7 +74,9 @@ function test_parseGlobalAddress() {
     const result = OMS_Utils.parseGlobalAddress(c.input);
     const pass = (result.addr1 === c.expected.addr1 &&
                   result.country === (c.expected.country || 'United States') &&
-                  result.success === c.expected.success);
+                  result.success === c.expected.success &&
+                  (c.expected.zip ? result.zip === c.expected.zip : true) &&
+                  (c.expected.city ? result.city === c.expected.city : true));
 
     if (!pass) {
       console.error(`test_parseGlobalAddress Case ${i} FAILED. Got: ${JSON.stringify(result)}`);
