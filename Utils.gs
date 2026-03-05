@@ -424,4 +424,39 @@ var OMS_Utils = {
     const day = String(d.getDate()).padStart(2, '0');
     return `${year}-${month}-${day}`;
   },
+
+  /********************************
+   * UI Helpers
+   ********************************/
+  applyBanding_(sheet) {
+    const lr = sheet.getMaxRows();
+    const lc = sheet.getLastColumn();
+    if (lr < 2 || lc < 1) return;
+
+    const range = sheet.getRange(2, 1, lr - 1, lc);
+    range.getBandings().forEach(b => b.remove());
+    range.applyRowBanding(SpreadsheetApp.BandingTheme.LIGHT_GREY, false, false)
+      .setFirstRowColor('#FFFFFF')
+      .setSecondRowColor('#F8FAFC');
+  },
+
+  applySectionShading_(sheet, map, sections) {
+    const lr = sheet.getMaxRows();
+    sections.forEach(sec => {
+      Object.keys(map).forEach(h => {
+        let match = false;
+        sec.headers.forEach(pattern => {
+          if (pattern.endsWith('*')) {
+            const prefix = pattern.slice(0, -1).toLowerCase();
+            if (h.startsWith(prefix)) match = true;
+          } else if (h === pattern.toLowerCase()) {
+            match = true;
+          }
+        });
+        if (match) {
+          sheet.getRange(1, map[h], lr, 1).setBackground(sec.color);
+        }
+      });
+    });
+  },
 };
