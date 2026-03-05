@@ -33,6 +33,9 @@ function outbound_onEdit(e) {
 
   // Velocity Automation: set status based on dates
   outbound_updateStatusFromDates_(sheet, row, cols, col);
+
+  // Timeline tracking
+  outbound_updateStageTimeline_(sheet, row, cols, col);
 }
 
 /**
@@ -76,8 +79,21 @@ function outbound_createStubs_(items) {
 
   const out = OMS_Utils.sheet_(OMS_CONFIG.TABS.OUTBOUND);
   const cols = OMS_Utils.getHeadersMap_(out);
+  const omsIidCol = cols['oms-order-item-id'];
 
-  const rows = items.map(it => {
+  const lr = out.getLastRow();
+  const existingMap = {};
+  if (lr >= 2) {
+    const ids = out.getRange(2, omsIidCol, lr - 1, 1).getValues();
+    ids.forEach((r, i) => {
+      const id = String(r[0] || '').trim();
+      if (id) existingMap[id] = i + 2;
+    });
+  }
+
+  const stamp = Utilities.formatDate(new Date(), OMS_CONFIG.TZ, 'yyyy-MM-dd HH:mm:ss');
+
+  items.forEach(it => {
     const row = new Array(out.getLastColumn()).fill('');
 
     OMS_Utils.setByHeader_(row, cols, 'merchant-order-id', it.merchantOrderId);
@@ -99,15 +115,37 @@ function outbound_createStubs_(items) {
       OMS_Utils.setByHeader_(row, cols, 'package-height-cm', OMS_CONFIG.PACKAGE_DEFAULTS.HEIGHT_CM);
     }
 
-    const stamp = Utilities.formatDate(new Date(), OMS_CONFIG.TZ, 'yyyy-MM-dd HH:mm:ss');
     OMS_Utils.setByHeader_(row, cols, 'system-updated-at', stamp);
 
-    return row;
-  });
+    const existingRow = existingMap[it.omsOrderItemId];
+    if (existingRow) {
+      // Upsert: Only update core stub fields to avoid wiping out tracking/dates
+      const stubHeaders = [
+        'merchant-order-id','merchant-order-item-id','sku','customer-id',
+        'outbound-workflow-type','oms-order-id','oms-order-item-id',
+        'system-updated-at'
+      ];
+      // Also update package defaults if they are blank in the existing row
+      // but for simplicity, we'll just update these core ones and leave the rest.
+      stubHeaders.forEach(h => {
+        const c = cols[h];
+        if (c) out.getRange(existingRow, c).setValue(row[c - 1]);
+      });
 
-  out.getRange(out.getLastRow() + 1, 1, rows.length, rows[0].length)
-    .setNumberFormat('@')
-    .setValues(rows);
+      // Update dimensions if currently empty
+      ['actual-weight-kg','package-length-cm','package-width-cm','package-height-cm','notes'].forEach(h => {
+        const c = cols[h];
+        if (c) {
+          const current = out.getRange(existingRow, c).getValue();
+          if (!current) out.getRange(existingRow, c).setValue(row[c - 1]);
+        }
+      });
+    } else {
+      out.getRange(out.getLastRow() + 1, 1, 1, row.length)
+        .setNumberFormat('@')
+        .setValues([row]);
+    }
+  });
 }
 
 function outbound_linkifyRow_(sheet, row, cols) {
@@ -219,6 +257,43 @@ function outbound_sendFinalDeliveryEmail_(outboundRow) {
     out.getRange(outboundRow, outCols['notes']).setValue(`Email error: ${err.message}`.slice(0, 200));
     OMS_Utils.opsAlert_(`Final email FAILED\noms-order-item-id: ${omsItem}\nError: ${err.message}`);
   }
+}
+
+/**
+ * Stage Timeline Tracking
+ * Appends human-readable stage updates to stage-timeline column
+ */
+function outbound_updateStageTimeline_(sheet, row, cols, editedCol) {
+  const timelineCol = OMS_Utils.col_(cols, 'stage-timeline');
+  if (!timelineCol) return;
+
+  const fields = {
+    'hub-received-date': 'Hub received',
+    'us-ship-date': 'US shipped',
+    'delivered-date': 'Delivered',
+    'domestic-tracking-kr': 'KR Tracking',
+    'international-tracking-us': 'US Tracking'
+  };
+
+  const fieldKeys = Object.keys(fields);
+  const relevantCols = fieldKeys.map(k => OMS_Utils.col_(cols, k));
+
+  if (!relevantCols.includes(editedCol)) return;
+
+  const timelineRange = sheet.getRange(row, timelineCol);
+
+  // Rebuild timeline deterministically based on current values of all tracked fields.
+  const newTimeline = fieldKeys.map(k => {
+    const c = OMS_Utils.col_(cols, k);
+    if (!c) return null;
+    const val = sheet.getRange(row, c).getDisplayValue();
+    if (val) {
+      return `${fields[k]} — ${val}`;
+    }
+    return null;
+  }).filter(Boolean).join('\n');
+
+  timelineRange.setValue(newTimeline);
 }
 
 function findBuyer_(sheet, cols, omsItem) {

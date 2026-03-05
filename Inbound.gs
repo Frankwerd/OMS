@@ -517,7 +517,9 @@ function inbound_runSamCart() {
 
       try {
         const clean = OMS_Utils.ultraCleanText_(msg.getBody());
-        const parsed = inbound_parseSamCartInvoice_(clean);
+        const msgDate = msg.getDate();
+        const purchaseTime = Utilities.formatDate(msgDate, OMS_CONFIG.TZ, 'HH:mm');
+        const parsed = inbound_parseSamCartInvoice_(clean, purchaseTime);
 
         // Standardize reshipments as Outbound-only
         if (String(parsed.orderId).toUpperCase().endsWith(OMS_CONFIG.RESHIP_SUFFIX)) return;
@@ -574,11 +576,12 @@ function inbound_runSamCart() {
 
             qty: it.quantity || parsed.quantity || 1,
             currency: 'USD',
-            itemPrice: parsed.subtotal,
+            itemPrice: it.price || parsed.subtotal,
             itemTax: parsed.tax,
             shippingPrice: parsed.shipping,
             totalAmount: parsed.totalAmount,
             couponCode: parsed.couponCode,
+            discountAmount: parsed.discount,
             refundAmount: parsed.refundAmount,
             refundDate: parsed.refundDate,
             returnReasonCode: parsed.returnReasonCode,
@@ -666,7 +669,7 @@ function inbound_collectExistingMessageIds_(sheet, msgCol) {
  * SamCart parsing: based on your legacy SamCartEngine.parse
  * Returns normalized object.
  */
-function inbound_parseSamCartInvoice_(text) {
+function inbound_parseSamCartInvoice_(text, purchaseTime) {
   const t = String(text || '');
   const u = t.toUpperCase();
   let parseStatus = 'OK', parseNotes = '';
@@ -685,7 +688,7 @@ function inbound_parseSamCartInvoice_(text) {
     t.match(/Date:\s*([A-Z][a-z]+ \d{1,2}, \d{4})/i);
 
   const purchaseDate = dateMatch ? normalizeDateYYYYMMDD_(dateMatch[1]) : '';
-  const purchaseTime = ''; // SamCart emails usually don’t include a stable time; leave blank.
+  // purchaseTime passed from caller context
 
   // Customer name/email
   const cust = t.match(/Customer\s*\n([^\n]+)\n([^\n]+@\S+)/i);
@@ -726,8 +729,15 @@ function inbound_parseSamCartInvoice_(text) {
   }
 
   // Specs (same as legacy)
-  const model = u.includes('PRO') ? 'Pro' : 'Basic';
-  const clubType = u.includes('WOOD') ? 'Wood' : (u.includes('IRON') ? 'Iron' : '7-iron');
+  let model = u.includes('PRO') ? 'Pro' : 'Basic';
+  let clubType = u.includes('WOOD') ? 'Wood' : (u.includes('IRON') ? 'Iron' : '7-iron');
+
+  if (!u.includes('PRO') && !u.includes('BASIC')) {
+    model = "Basic";
+  }
+  if (!u.includes('WOOD') && !u.includes('IRON')) {
+    clubType = "7-iron";
+  }
   const flex = (u.includes('L-FLEX') || u.includes('LADIE')) ? 'L' : (u.includes('R-FLEX') || u.includes('REGULAR')) ? 'R' : 'S';
   const gripSize = (u.includes('MIDSIZE') || u.includes('MID SIZE')) ? 'Mid' : 'Standard';
   const length = u.includes('LONGER') ? 'Longer' : 'Standard';
@@ -750,7 +760,17 @@ function inbound_parseSamCartInvoice_(text) {
   const totalAmount = Number((subtotal + shipping + tax - discount - refundAmount).toFixed(2));
 
   const couponCode = (t.match(/Coupon:\s*([^\n\r]+)/i) || ['', ''])[1].trim();
-  const quantity = Number((t.match(/Qty:\s*(\d+)/i) || ['', '1'])[1]) || 1;
+
+  // Parse product line: G-GRIP - Men's 7-Iron Qty: 1 $220.00
+  let productName = '', quantity = 1, itemPrice = subtotal;
+  const itemMatch = t.match(/(G-GRIP\s*-\s*[^Q\n]+)\s*Qty:\s*(\d+)\s*\$([\d,.]+)/i);
+  if (itemMatch) {
+    productName = itemMatch[1].trim();
+    quantity = parseInt(itemMatch[2]);
+    itemPrice = parseFloat(itemMatch[3].replace(/,/g, ''));
+  } else {
+    quantity = Number((t.match(/Qty:\s*(\d+)/i) || ['', '1'])[1]) || 1;
+  }
 
   // SKU (SamCart often does not have it) → safe placeholder
   let sku = '';
@@ -761,7 +781,7 @@ function inbound_parseSamCartInvoice_(text) {
   return {
     orderId,
     purchaseDate,
-    purchaseTime,
+    purchaseTime: purchaseTime || '',
     buyerName,
     buyerEmail,
     buyerPhone,
@@ -773,7 +793,7 @@ function inbound_parseSamCartInvoice_(text) {
     shipCountry,
     shipServiceLevel: '',
 
-    productName: '',
+    productName,
     model,
     clubType,
 
@@ -787,6 +807,7 @@ function inbound_parseSamCartInvoice_(text) {
     subtotal,
     shipping,
     tax,
+    discount,
     totalAmount,
     couponCode,
 
@@ -798,7 +819,8 @@ function inbound_parseSamCartInvoice_(text) {
     items: [{
       sku,
       quantity,
-      productName: '',
+      price: itemPrice,
+      productName,
       model,
       clubType,
       hand,
@@ -848,6 +870,7 @@ function inbound_buildRowFromHeaders_(headersMap, lastCol, v) {
   OMS_Utils.setByHeader_(row, headersMap, 'shipping-price', v.shippingPrice);
   OMS_Utils.setByHeader_(row, headersMap, 'total-amount', v.totalAmount);
   OMS_Utils.setByHeader_(row, headersMap, 'coupon-code', v.couponCode);
+  OMS_Utils.setByHeader_(row, headersMap, 'discount-amount', v.discountAmount);
 
   OMS_Utils.setByHeader_(row, headersMap, 'refund-amount', v.refundAmount);
   OMS_Utils.setByHeader_(row, headersMap, 'refund-date', v.refundDate);

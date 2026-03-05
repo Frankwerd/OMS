@@ -5,7 +5,7 @@ const OMS_CONFIG = {
   // Standalone script: REQUIRED
   SPREADSHEET_ID: '1I7l8LrFjdNQePw5gcVBiSoKAm3RdX9wqmUbHVFV4tuA',
 
-  SCHEMA_VERSION: '1.2.0',
+  SCHEMA_VERSION: '1.3.0',
 
   TZ: Session.getScriptTimeZone(),
 

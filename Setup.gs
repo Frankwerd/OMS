@@ -57,7 +57,7 @@ function OMS_SCHEMA_INBOUND_() {
     'buyer-phone-number','customer-id','system-gmail-id','sales-channel','customer-classification','is-business-order',
     'sku','product-name','mag-safe-stand','model','club-type','hand','flex','length','grip-size','head-material',
     'shaft-material','loft','lie-angle','offset','quantity-purchased','currency','item-price','item-tax','shipping-price',
-    'total-amount','coupon-code','refund-amount','refund-date','return-reason-code','recipient-name','ship-address-1',
+    'total-amount','coupon-code','discount-amount','refund-amount','refund-date','return-reason-code','recipient-name','ship-address-1',
     'ship-city','ship-state','ship-postal-code','ship-country','ship-service-level','serial-number-allocated','notes',
     'automation-notes','item-life-cycle','order-life-cycle','replacement-for-order-id','replacement-for-order-item-id',
     'replacement-type','replacement-group-id','system-created-at','system-updated-at','parse-status',
@@ -73,7 +73,7 @@ function OMS_SCHEMA_OUTBOUND_() {
     'original-merchant-order-id','original-merchant-order-item-id',
     'domestic-tracking-kr','hub-received-date','international-tracking-us','carrier-us',
     'us-ship-date','delivered-date',
-    'outbound-status','serial-number-scanned','sn-verify','customer-email-status','last-email-at','system-updated-at','notes',
+    'outbound-status','serial-number-scanned','sn-verify','customer-email-status','last-email-at','system-updated-at','notes','stage-timeline',
     'oms-order-id','oms-order-item-id','shipment-id',
     'actual-weight-kg','package-length-cm','package-width-cm','package-height-cm'
   ];
@@ -198,6 +198,7 @@ function styleInbound_(sheet) {
   setNumberFormat_(sheet, map, 'item-tax', '$0.00');
   setNumberFormat_(sheet, map, 'shipping-price', '$0.00');
   setNumberFormat_(sheet, map, 'total-amount', '$0.00');
+  setNumberFormat_(sheet, map, 'discount-amount', '$0.00');
   setNumberFormat_(sheet, map, 'refund-amount', '$0.00');
   setNumberFormat_(sheet, map, 'quantity-purchased', '0');
   setNumberFormat_(sheet, map, 'system-created-at', 'yyyy-mm-dd hh:mm:ss');
@@ -289,6 +290,7 @@ function styleOutbound_(sheet) {
   setColWidth_(sheet, map, 'domestic-tracking-kr', 180);
   setColWidth_(sheet, map, 'international-tracking-us', 200);
   setColWidth_(sheet, map, 'notes', 260);
+  setColWidth_(sheet, map, 'stage-timeline', 260);
   setColWidth_(sheet, map, 'actual-weight-kg', 120);
   setColWidth_(sheet, map, 'package-length-cm', 140);
   setColWidth_(sheet, map, 'package-width-cm', 140);
