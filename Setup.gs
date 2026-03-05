@@ -53,9 +53,9 @@ function omsRefreshDashboard() {
 
 function OMS_SCHEMA_INBOUND_() {
   return [
-    'merchant-order-id','merchant-order-item-id','purchase-date','purchase-time','buyer-email','buyer-name',
-    'buyer-phone-number','customer-id','system-gmail-id','sales-channel','customer-classification','is-business-order',
-    'sku','product-name','mag-safe-stand','model','club-type','hand','flex','length','grip-size','head-material',
+    'merchant-order-id','merchant-order-item-id','line-item-index','purchase-date','purchase-time','order-created-at','buyer-email','buyer-name',
+    'buyer-phone-number','customer-id','system-gmail-id','order-source-email','sales-channel','customer-classification','is-business-order',
+    'sku','product-name','mag-safe-stand','model','club-type','product-category','hand','flex','shaft-length-option','grip-size','head-material',
     'shaft-material','loft','lie-angle','offset','quantity-purchased','currency','item-price','item-tax','shipping-price',
     'total-amount','coupon-code','discount-amount','refund-amount','refund-date','return-reason-code','recipient-name','ship-address-1',
     'ship-city','ship-state','ship-postal-code','ship-country','ship-service-level','serial-number-allocated','notes',
@@ -71,7 +71,8 @@ function OMS_SCHEMA_OUTBOUND_() {
   return [
     'merchant-order-id','merchant-order-item-id','sku','customer-id','outbound-workflow-type',
     'original-merchant-order-id','original-merchant-order-item-id',
-    'domestic-tracking-kr','hub-received-date','international-tracking-us','carrier-us',
+    'order-created-at','delivery-country','package-type',
+    'domestic-tracking-kr','hub-received-date','hub-location','international-tracking-us','carrier-us',
     'us-ship-date','delivered-date',
     'outbound-status','serial-number-scanned','sn-verify','customer-email-status','last-email-at','system-updated-at','notes','stage-timeline',
     'oms-order-id','oms-order-item-id','shipment-id',
@@ -188,11 +189,14 @@ function styleInbound_(sheet) {
   setColWidth_(sheet, map, 'ship-address-1', 280);
   setColWidth_(sheet, map, 'sku', 160);
   setColWidth_(sheet, map, 'product-name', 220);
+  setColWidth_(sheet, map, 'order-created-at', 180);
+  setColWidth_(sheet, map, 'order-source-email', 220);
   setColWidth_(sheet, map, 'notes', 260);
   setColWidth_(sheet, map, 'automation-notes', 260);
 
   // formats
   setNumberFormat_(sheet, map, 'purchase-date', 'yyyy-mm-dd');
+  setNumberFormat_(sheet, map, 'order-created-at', 'yyyy-mm-dd hh:mm:ss');
   setNumberFormat_(sheet, map, 'refund-date', 'yyyy-mm-dd');
   setNumberFormat_(sheet, map, 'item-price', '$0.00');
   setNumberFormat_(sheet, map, 'item-tax', '$0.00');
@@ -208,7 +212,7 @@ function styleInbound_(sheet) {
   applyDropdown_(sheet, map, 'customer-classification', ['Active','Replaced','Refunded','']);
   applyDropdown_(sheet, map, 'model', ['Pro','Basic','']);
   applyDropdown_(sheet, map, 'grip-size', ['Standard','Mid','']);
-  applyDropdown_(sheet, map, 'length', ['Standard','Longer','']);
+  applyDropdown_(sheet, map, 'shaft-length-option', ['Standard','Longer','']);
   applyDropdown_(sheet, map, 'hand', ['Right','Left','']);
   applyDropdown_(sheet, map, 'flex', ['L','R','S','X','']);
   applyDropdown_(sheet, map, 'mag-safe-stand', ['Yes','0','']);
@@ -250,7 +254,7 @@ function styleInbound_(sheet) {
     'Mid':      { bg:'#FDE68A', fg:'#92400E' },
   });
 
-  addChipRules_(rules, sheet, map, 'length', {
+  addChipRules_(rules, sheet, map, 'shaft-length-option', {
     'Standard': { bg:'#D1E7F0', fg:'#0F4C5C' },
     'Longer':   { bg:'#D9F99D', fg:'#166534' },
   });
@@ -287,6 +291,7 @@ function styleOutbound_(sheet) {
 
   setColWidth_(sheet, map, 'oms-order-id', 220);
   setColWidth_(sheet, map, 'oms-order-item-id', 260);
+  setColWidth_(sheet, map, 'order-created-at', 180);
   setColWidth_(sheet, map, 'domestic-tracking-kr', 180);
   setColWidth_(sheet, map, 'international-tracking-us', 200);
   setColWidth_(sheet, map, 'notes', 260);
@@ -296,6 +301,7 @@ function styleOutbound_(sheet) {
   setColWidth_(sheet, map, 'package-width-cm', 140);
   setColWidth_(sheet, map, 'package-height-cm', 140);
 
+  setNumberFormat_(sheet, map, 'order-created-at', 'yyyy-mm-dd hh:mm:ss');
   setNumberFormat_(sheet, map, 'hub-received-date', 'yyyy-mm-dd');
   setNumberFormat_(sheet, map, 'us-ship-date', 'yyyy-mm-dd');
   setNumberFormat_(sheet, map, 'delivered-date', 'yyyy-mm-dd');
@@ -308,6 +314,8 @@ function styleOutbound_(sheet) {
   setNumberFormat_(sheet, map, 'package-height-cm', '0.00');
 
   applyDropdown_(sheet, map, 'carrier-us', ['FEDEX','UPS','USPS','DHL','OTHER','']);
+  applyDropdown_(sheet, map, 'hub-location', ['Seoul','Busan','Los Angeles','']);
+  applyDropdown_(sheet, map, 'package-type', ['standard-club','club-with-stand','']);
   applyDropdown_(sheet, map, 'outbound-status', ['CREATED','KR_SHIPPED','HUB_RECEIVED','US_SHIPPED','DELIVERED','EXCEPTION','HOLD','CANCELLED','']);
   applyDropdown_(sheet, map, 'sn-verify', ['OK','MISMATCH','ERROR: No allocated S/N','']);
   applyDropdown_(sheet, map, 'customer-email-status', ['Sent: Final Delivery','Error','SKIP','']);

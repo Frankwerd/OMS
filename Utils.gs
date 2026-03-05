@@ -317,7 +317,7 @@ var OMS_Utils = {
     }
 
     if (!d.success && usCaMatch) {
-      d.city = usCaMatch[1].trim();
+      d.city = this.toTitleCase_(usCaMatch[1].trim());
       d.state = this.mapStateToAbbr_(usCaMatch[2].trim());
       d.zip = usCaMatch[3].trim().toUpperCase();
       d.success = true;
@@ -368,6 +368,8 @@ var OMS_Utils = {
 
     // 3. Addr1 is whatever is left
     if (d.success) {
+      // If city extraction left commas, clean them
+      d.city = String(d.city || '').replace(/^,|,$/g, '').trim();
       d.addr1 = working.length ? working.join(', ') : originalBlock;
     } else {
       d.city = ""; d.state = ""; d.zip = "";
@@ -384,6 +386,21 @@ var OMS_Utils = {
       'ALABAMA': 'AL', 'ALASKA': 'AK', 'ARIZONA': 'AZ', 'ARKANSAS': 'AR', 'CALIFORNIA': 'CA', 'COLORADO': 'CO', 'CONNECTICUT': 'CT', 'DELAWARE': 'DE', 'FLORIDA': 'FL', 'GEORGIA': 'GA', 'HAWAII': 'HI', 'IDAHO': 'ID', 'ILLINOIS': 'IL', 'INDIANA': 'IN', 'IOWA': 'IA', 'KANSAS': 'KS', 'KENTUCKY': 'KY', 'LOUISIANA': 'LA', 'MAINE': 'ME', 'MARYLAND': 'MD', 'MASSACHUSETTS': 'MA', 'MICHIGAN': 'MI', 'MINNESOTA': 'MN', 'MISSISSIPPI': 'MS', 'MISSOURI': 'MO', 'MONTANA': 'MT', 'NEBRASKA': 'NE', 'NEVADA': 'NV', 'NEW HAMPSHIRE': 'NH', 'NEW JERSEY': 'NJ', 'NEW MEXICO': 'NM', 'NEW YORK': 'NY', 'NORTH CAROLINA': 'NC', 'NORTH DAKOTA': 'ND', 'OHIO': 'OH', 'OKLAHOMA': 'OK', 'OREGON': 'OR', 'PENNSYLVANIA': 'PA', 'RHODE ISLAND': 'RI', 'SOUTH CAROLINA': 'SC', 'SOUTH DAKOTA': 'SD', 'TENNESSEE': 'TN', 'TEXAS': 'TX', 'UTAH': 'UT', 'VERMONT': 'VT', 'VIRGINIA': 'VA', 'WASHINGTON': 'WA', 'WEST VIRGINIA': 'WV', 'WISCONSIN': 'WI', 'WYOMING': 'WY'
     };
     return map[s] || s;
+  },
+
+  toTitleCase_(str) {
+    if (!str) return '';
+    return str.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+  },
+
+  decodeHtmlEntities_(text) {
+    if (!text) return '';
+    return String(text)
+      .replace(/&#39;/g, "'")
+      .replace(/&quot;/g, '"')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>');
   },
 
   normalizeDateYYYYMMDD(dateStr) {
