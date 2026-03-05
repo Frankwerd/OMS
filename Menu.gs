@@ -7,6 +7,6 @@ function onOpen() {
     .addItem('Setup Sheet', 'omsSetupSheet')
     .addSeparator()
     .addItem('Refresh Dashboard', 'omsRefreshDashboard')
-    .addItem('Refresh Master OMS View', 'refreshMasterOmsView')
+    .addItem('Refresh Master Table', 'refreshMasterOmsTable')
     .addToUi();
 }

@@ -153,7 +153,6 @@ function inbound_runShopify() {
         if (!rows.length) throw new Error('No items parsed from Shopify order.');
 
         inbound.getRange(inbound.getLastRow() + 1, 1, rows.length, rows[0].length)
-          .setNumberFormat('@')
           .setValues(rows);
 
         // Create Outbound stubs
@@ -404,7 +403,6 @@ function inbound_runImweb() {
         if (!rows.length) throw new Error('No items parsed from Imweb order.');
 
         inbound.getRange(inbound.getLastRow() + 1, 1, rows.length, rows[0].length)
-          .setNumberFormat('@')
           .setValues(rows);
 
         // Create Outbound stubs
@@ -670,7 +668,6 @@ function inbound_runSamCart() {
         if (!rows.length) throw new Error('No items parsed from SamCart invoice.');
 
         inbound.getRange(inbound.getLastRow() + 1, 1, rows.length, rows[0].length)
-          .setNumberFormat('@')
           .setValues(rows);
 
         // Create Outbound stubs
