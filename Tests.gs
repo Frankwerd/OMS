@@ -7,6 +7,7 @@ function runAllTests() {
   test_deriveSku();
   test_parseGlobalAddress();
   test_normalizers();
+  test_migrationHelpers();
 }
 
 function test_deriveSku() {
@@ -41,6 +42,26 @@ function test_deriveSku() {
       console.log(`test_deriveSku Case ${i} PASSED.`);
     }
   });
+}
+
+function test_migrationHelpers() {
+  // Currency
+  if (migrate_parseCurrency_('$220.00') !== 220) console.error('test_migrationHelpers Currency 1 FAILED');
+  if (migrate_parseCurrency_('2,220.50') !== 2220.50) console.error('test_migrationHelpers Currency 2 FAILED');
+
+  // Phone
+  if (migrate_parsePhone_('="3104302093"') !== '+1-310-430-2093') console.error('test_migrationHelpers Phone 1 FAILED');
+
+  // Date
+  if (migrate_parseDate_('02/17/2026') !== '2026-02-17') console.error('test_migrationHelpers Date 1 FAILED');
+
+  // Completion Date
+  const cd1 = migrate_parseCompletionDate_('Wednesday, 2/25/26 at 11:55 AM');
+  if (!cd1 || cd1.getFullYear() !== 2026 || cd1.getMonth() !== 1 || cd1.getDate() !== 25) {
+    console.error('test_migrationHelpers Completion Date 1 FAILED', cd1);
+  }
+
+  console.log('test_migrationHelpers PASSED (if no errors above).');
 }
 
 function test_normalizers() {

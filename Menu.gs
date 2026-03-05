@@ -8,5 +8,8 @@ function onOpen() {
     .addSeparator()
     .addItem('Refresh Dashboard', 'omsRefreshDashboard')
     .addItem('Refresh Master Table', 'refreshMasterOmsTable')
+    .addSeparator()
+    .addItem('Migrate Legacy Inbound', 'migrateInboundLegacyToNew')
+    .addItem('Migrate Legacy Outbound', 'migrateOutboundLegacyToNew')
     .addToUi();
 }
