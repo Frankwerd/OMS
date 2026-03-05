@@ -6,6 +6,7 @@
 function runAllTests() {
   test_deriveSku();
   test_parseGlobalAddress();
+  test_normalizers();
 }
 
 function test_deriveSku() {
@@ -38,6 +39,33 @@ function test_deriveSku() {
       console.error(`test_deriveSku Case ${i} FAILED. Expected: ${c.expected}, Got: ${result}`);
     } else {
       console.log(`test_deriveSku Case ${i} PASSED.`);
+    }
+  });
+}
+
+function test_normalizers() {
+  // Email
+  const e1 = OMS_Utils.normalizeEmail_('  Test@Example.Com  ');
+  if (e1 !== 'test@example.com') console.error(`test_normalizers Email FAILED. Got: ${e1}`);
+  else console.log('test_normalizers Email PASSED.');
+
+  // Phone
+  const cases = [
+    { input: '4848948972\n5120 Devon court', expected: '48489489725120' }, // This is what happened before
+    // Wait, the issue said:
+    // 48489489725120 -> Should be: 4848948972
+    // My normalizePhone just strips non-digits.
+    // The FIX was also the regex in Inbound.gs
+    { input: '4848948972', expected: '4848948972' },
+    { input: '+1 (123) 456-7890', expected: '+11234567890' }
+  ];
+
+  cases.forEach((c, i) => {
+    const result = OMS_Utils.normalizePhone(c.input);
+    if (result !== c.expected) {
+      console.error(`test_normalizers Phone Case ${i} FAILED. Expected: ${c.expected}, Got: ${result}`);
+    } else {
+      console.log(`test_normalizers Phone Case ${i} PASSED.`);
     }
   });
 }

@@ -108,6 +108,10 @@ var OMS_Utils = {
     return String(email || '').trim().toLowerCase();
   },
 
+  normalizePhone(phone) {
+    return String(phone || '').replace(/[^\d+]/g, '');
+  },
+
   sha256Hex_(text) {
     const bytes = Utilities.computeDigest(
       Utilities.DigestAlgorithm.SHA_256,

@@ -755,9 +755,9 @@ function inbound_parseSamCartInvoice_(text, purchaseTime) {
 
   // Phone
   const phoneMatch =
-    t.match(/(?:Phone|delivery\.):\s*(\+?\d[\d\s\-\(\)]{7,15})/i) ||
-    t.match(/Customer\s*\n.*\n.*\n(\+?[\d\s\-\(\)]{7,15})/i);
-  const buyerPhone = phoneMatch ? String(phoneMatch[1]).trim().replace(/\s/g, '').slice(0, 15) : '';
+    t.match(/(?:Phone|delivery\.):\s*(\+?\d[\d \-\(\)]{8,15})/i) ||
+    t.match(/Customer\s*\n.*\n.*\n(\+?[\d \-\(\)]{8,15})/i);
+  const buyerPhone = phoneMatch ? OMS_Utils.normalizePhone(phoneMatch[1]) : '';
 
   // Ship To block
   let shipAddr1 = '', shipCity = '', shipState = '', shipPostal = '', shipCountry = 'United States';

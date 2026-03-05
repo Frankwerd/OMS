@@ -110,6 +110,8 @@ function outbound_createStubs_(items) {
     OMS_Utils.setByHeader_(row, cols, 'outbound-status', 'CREATED');
     OMS_Utils.setByHeader_(row, cols, 'oms-order-id', it.omsOrderId);
     OMS_Utils.setByHeader_(row, cols, 'oms-order-item-id', it.omsOrderItemId);
+    OMS_Utils.setByHeader_(row, cols, 'shipment-id', `${it.omsOrderItemId}:DIRECT_SHIP:001`);
+    OMS_Utils.setByHeader_(row, cols, 'stage-timeline', `CREATED — ${it.orderCreatedAt || stamp}`);
 
     // Package defaults based on stand
     if (it.magSafeStand === 'Yes' || it.magSafeStand === '1') {
@@ -293,17 +295,25 @@ function outbound_updateStageTimeline_(sheet, row, cols, editedCol) {
   const timelineRange = sheet.getRange(row, timelineCol);
 
   // Rebuild timeline deterministically based on current values of all tracked fields.
-  const newTimeline = fieldKeys.map(k => {
+  const events = [];
+
+  // Initial event
+  const createdAtCol = OMS_Utils.col_(cols, 'order-created-at');
+  if (createdAtCol) {
+    const createdVal = sheet.getRange(row, createdAtCol).getDisplayValue();
+    if (createdVal) events.push(`CREATED — ${createdVal}`);
+  }
+
+  fieldKeys.forEach(k => {
     const c = OMS_Utils.col_(cols, k);
-    if (!c) return null;
+    if (!c) return;
     const val = sheet.getRange(row, c).getDisplayValue();
     if (val) {
-      return `${fields[k]} — ${val}`;
+      events.push(`${fields[k]} — ${val}`);
     }
-    return null;
-  }).filter(Boolean).join('\n');
+  });
 
-  timelineRange.setValue(newTimeline);
+  timelineRange.setValue(events.join('\n'));
 }
 
 function findBuyer_(sheet, cols, omsItem) {
