@@ -51,13 +51,10 @@ function test_normalizers() {
 
   // Phone
   const cases = [
-    { input: '4848948972\n5120 Devon court', expected: '48489489725120' }, // This is what happened before
-    // Wait, the issue said:
-    // 48489489725120 -> Should be: 4848948972
-    // My normalizePhone just strips non-digits.
-    // The FIX was also the regex in Inbound.gs
-    { input: '4848948972', expected: '4848948972' },
-    { input: '+1 (123) 456-7890', expected: '+11234567890' }
+    { input: '4848948972', expected: '+1-484-894-8972' },
+    { input: '14848948972', expected: '+1-484-894-8972' },
+    { input: '+1 (123) 456-7890', expected: '+1-123-456-7890' },
+    { input: '9999', expected: '9999' }
   ];
 
   cases.forEach((c, i) => {

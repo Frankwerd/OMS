@@ -116,7 +116,11 @@ function outbound_createStubs_(items) {
     // Package defaults based on stand
     if (it.magSafeStand === 'Yes' || it.magSafeStand === '1') {
       OMS_Utils.setByHeader_(row, cols, 'package-type', 'club-with-stand');
-      OMS_Utils.setByHeader_(row, cols, 'notes', 'Stand included: package dims TBD');
+      OMS_Utils.setByHeader_(row, cols, 'actual-weight-kg', OMS_CONFIG.STAND_DEFAULTS.WEIGHT_KG);
+      OMS_Utils.setByHeader_(row, cols, 'package-length-cm', OMS_CONFIG.STAND_DEFAULTS.LENGTH_CM);
+      OMS_Utils.setByHeader_(row, cols, 'package-width-cm', OMS_CONFIG.STAND_DEFAULTS.WIDTH_CM);
+      OMS_Utils.setByHeader_(row, cols, 'package-height-cm', OMS_CONFIG.STAND_DEFAULTS.HEIGHT_CM);
+      OMS_Utils.setByHeader_(row, cols, 'notes', 'Stand included.');
     } else {
       OMS_Utils.setByHeader_(row, cols, 'package-type', 'standard-club');
       OMS_Utils.setByHeader_(row, cols, 'actual-weight-kg', OMS_CONFIG.PACKAGE_DEFAULTS.WEIGHT_KG);

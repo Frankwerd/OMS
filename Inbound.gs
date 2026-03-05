@@ -45,8 +45,9 @@ function inbound_runShopify() {
         // Standardize reshipments as Outbound-only
         if (String(parsed.orderId).toUpperCase().endsWith(OMS_CONFIG.RESHIP_SUFFIX)) return;
 
-        const customerId = parsed.buyerEmail ? OMS_Utils.lookupOrCreateCustomerId_(parsed.buyerEmail) : 'C-UNKNOWN';
-        const emailHash = parsed.buyerEmail ? OMS_Utils.emailHash_(parsed.buyerEmail) : '';
+        const buyerEmail = OMS_Utils.normalizeEmail_(parsed.buyerEmail);
+        const customerId = buyerEmail ? OMS_Utils.lookupOrCreateCustomerId_(buyerEmail) : 'C-UNKNOWN';
+        const emailHash = buyerEmail ? OMS_Utils.emailHash_(buyerEmail) : '';
 
         const sourceSystem = OMS_CONFIG.SOURCE_SYSTEMS.SHOPIFY;
         const sourceOrderId = parsed.orderId;
@@ -78,7 +79,7 @@ function inbound_runShopify() {
             purchaseTime: parsed.purchaseTime,
             orderCreatedAt,
 
-            buyerEmail: parsed.buyerEmail,
+            buyerEmail,
             buyerName: parsed.buyerName,
             buyerPhone: parsed.buyerPhone,
 
@@ -309,8 +310,9 @@ function inbound_runImweb() {
         // Standardize reshipments as Outbound-only
         if (String(parsed.orderId).toUpperCase().endsWith(OMS_CONFIG.RESHIP_SUFFIX)) return;
 
-        const customerId = parsed.buyerEmail ? OMS_Utils.lookupOrCreateCustomerId_(parsed.buyerEmail) : 'C-UNKNOWN';
-        const emailHash = parsed.buyerEmail ? OMS_Utils.emailHash_(parsed.buyerEmail) : '';
+        const buyerEmail = OMS_Utils.normalizeEmail_(parsed.buyerEmail);
+        const customerId = buyerEmail ? OMS_Utils.lookupOrCreateCustomerId_(buyerEmail) : 'C-UNKNOWN';
+        const emailHash = buyerEmail ? OMS_Utils.emailHash_(buyerEmail) : '';
 
         const sourceSystem = OMS_CONFIG.SOURCE_SYSTEMS.IMWEB;
         const sourceOrderId = parsed.orderId;
@@ -339,7 +341,7 @@ function inbound_runImweb() {
             purchaseDate: parsed.purchaseDate,
             purchaseTime: parsed.purchaseTime,
             orderCreatedAt,
-            buyerEmail: parsed.buyerEmail,
+            buyerEmail,
             buyerName: parsed.buyerName,
             buyerPhone: parsed.buyerPhone,
             customerId,
@@ -550,8 +552,9 @@ function inbound_runSamCart() {
         // Standardize reshipments as Outbound-only
         if (String(parsed.orderId).toUpperCase().endsWith(OMS_CONFIG.RESHIP_SUFFIX)) return;
 
-        const customerId = parsed.buyerEmail ? OMS_Utils.lookupOrCreateCustomerId_(parsed.buyerEmail) : 'C-UNKNOWN';
-        const emailHash = parsed.buyerEmail ? OMS_Utils.emailHash_(parsed.buyerEmail) : '';
+        const buyerEmail = OMS_Utils.normalizeEmail_(parsed.buyerEmail);
+        const customerId = buyerEmail ? OMS_Utils.lookupOrCreateCustomerId_(buyerEmail) : 'C-UNKNOWN';
+        const emailHash = buyerEmail ? OMS_Utils.emailHash_(buyerEmail) : '';
 
         const sourceSystem = OMS_CONFIG.SOURCE_SYSTEMS.SAMCART;
         const sourceOrderId = parsed.orderId;
@@ -588,7 +591,7 @@ function inbound_runSamCart() {
             purchaseTime: parsed.purchaseTime,
             orderCreatedAt,
 
-            buyerEmail: parsed.buyerEmail,
+            buyerEmail,
             buyerName: parsed.buyerName,
             buyerPhone: parsed.buyerPhone,
 

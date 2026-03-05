@@ -16,6 +16,13 @@ const OMS_CONFIG = {
     HEIGHT_CM: 8.5,
   },
 
+  STAND_DEFAULTS: {
+    WEIGHT_KG: 2.2,
+    WIDTH_CM: 108,
+    LENGTH_CM: 20,
+    HEIGHT_CM: 15,
+  },
+
   ERRORS: {
     MISSING_ORDER_ID: 'ERR_NO_ORDER_ID',
     MISSING_EMAIL: 'ERR_NO_EMAIL',
