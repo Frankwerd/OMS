@@ -80,6 +80,10 @@ function outbound_createStubs_(items) {
   const out = OMS_Utils.sheet_(OMS_CONFIG.TABS.OUTBOUND);
   const cols = OMS_Utils.getHeadersMap_(out);
   const omsIidCol = cols['oms-order-item-id'];
+  if (!omsIidCol) {
+    OMS_Utils.opsAlert_('Outbound stub creation failed: oms-order-item-id column not found.');
+    return;
+  }
 
   const lr = out.getLastRow();
   const existingMap = {};
@@ -100,6 +104,8 @@ function outbound_createStubs_(items) {
     OMS_Utils.setByHeader_(row, cols, 'merchant-order-item-id', it.merchantOrderItemId);
     OMS_Utils.setByHeader_(row, cols, 'sku', it.sku);
     OMS_Utils.setByHeader_(row, cols, 'customer-id', it.customerId);
+    OMS_Utils.setByHeader_(row, cols, 'order-created-at', it.orderCreatedAt);
+    OMS_Utils.setByHeader_(row, cols, 'delivery-country', it.deliveryCountry);
     OMS_Utils.setByHeader_(row, cols, 'outbound-workflow-type', 'DIRECT_SHIP');
     OMS_Utils.setByHeader_(row, cols, 'outbound-status', 'CREATED');
     OMS_Utils.setByHeader_(row, cols, 'oms-order-id', it.omsOrderId);
@@ -107,8 +113,10 @@ function outbound_createStubs_(items) {
 
     // Package defaults based on stand
     if (it.magSafeStand === 'Yes' || it.magSafeStand === '1') {
+      OMS_Utils.setByHeader_(row, cols, 'package-type', 'club-with-stand');
       OMS_Utils.setByHeader_(row, cols, 'notes', 'Stand included: package dims TBD');
     } else {
+      OMS_Utils.setByHeader_(row, cols, 'package-type', 'standard-club');
       OMS_Utils.setByHeader_(row, cols, 'actual-weight-kg', OMS_CONFIG.PACKAGE_DEFAULTS.WEIGHT_KG);
       OMS_Utils.setByHeader_(row, cols, 'package-length-cm', OMS_CONFIG.PACKAGE_DEFAULTS.LENGTH_CM);
       OMS_Utils.setByHeader_(row, cols, 'package-width-cm', OMS_CONFIG.PACKAGE_DEFAULTS.WIDTH_CM);
@@ -122,6 +130,7 @@ function outbound_createStubs_(items) {
       // Upsert: Only update core stub fields to avoid wiping out tracking/dates
       const stubHeaders = [
         'merchant-order-id','merchant-order-item-id','sku','customer-id',
+        'order-created-at','delivery-country',
         'outbound-workflow-type','oms-order-id','oms-order-item-id',
         'system-updated-at'
       ];
@@ -146,6 +155,7 @@ function outbound_createStubs_(items) {
         .setValues([row]);
     }
   });
+  SpreadsheetApp.flush();
 }
 
 function outbound_linkifyRow_(sheet, row, cols) {

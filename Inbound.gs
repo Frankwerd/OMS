@@ -52,22 +52,31 @@ function inbound_runShopify() {
         const sourceOrderId = parsed.orderId;
         const omsOrderId = OMS_Utils.buildOmsOrderId_(sourceSystem, sourceOrderId);
 
+        const orderCreatedAt = (parsed.purchaseDate && parsed.purchaseTime)
+          ? `${parsed.purchaseDate}T${parsed.purchaseTime}:00`
+          : Utilities.formatDate(msg.getDate(), OMS_CONFIG.TZ, "yyyy-MM-dd'T'HH:mm:ss");
+
+        const orderSourceEmail = String(msg.getFrom() || '').match(/<([^>]+)>/)?.[1] || msg.getFrom();
+
         const now = new Date();
         const stamp = Utilities.formatDate(now, OMS_CONFIG.TZ, 'yyyy-MM-dd HH:mm:ss');
 
         const rows = [];
         const stubData = [];
         parsed.items.forEach((it, idx) => {
-          const sourceOrderItemId = it.itemId || OMS_Utils.generateLineItemId_(idx + 1);
+          const lineItemIndex = idx + 1;
+          const sourceOrderItemId = it.itemId || OMS_Utils.generateLineItemId_(lineItemIndex);
           const omsOrderItemId = OMS_Utils.buildOmsOrderItemId_(omsOrderId, sourceOrderItemId);
 
           rows.push(inbound_buildRowFromHeaders_(cols, inbound.getLastColumn(), {
             // core ids
             merchantOrderId: sourceOrderId,
             merchantOrderItemId: sourceOrderItemId,
+            lineItemIndex,
 
             purchaseDate: parsed.purchaseDate,
             purchaseTime: parsed.purchaseTime,
+            orderCreatedAt,
 
             buyerEmail: parsed.buyerEmail,
             buyerName: parsed.buyerName,
@@ -75,19 +84,21 @@ function inbound_runShopify() {
 
             customerId,
             systemGmailId: msgId,
+            orderSourceEmail,
 
             salesChannel: 'Shopify',
             customerClassification: 'Active',
             isBusinessOrder: 'false',
 
             sku: it.sku || 'SHOPIFY-UNMAPPED',
-            productName: it.productName,
+            productName: OMS_Utils.decodeHtmlEntities_(it.productName),
             magSafeStand: it.magSafeStand,
             model: it.model,
             clubType: it.clubType,
+            productCategory: 'Golf Club',
             hand: it.hand,
             flex: it.flex,
-            length: it.length,
+            shaftLengthOption: it.length,
             gripSize: it.gripSize,
 
             qty: it.quantity || 1,
@@ -133,6 +144,8 @@ function inbound_runShopify() {
             omsOrderId,
             omsOrderItemId,
             magSafeStand: it.magSafeStand,
+            orderCreatedAt,
+            deliveryCountry: parsed.shipCountry,
           });
         });
 
@@ -303,36 +316,47 @@ function inbound_runImweb() {
         const sourceOrderId = parsed.orderId;
         const omsOrderId = OMS_Utils.buildOmsOrderId_(sourceSystem, sourceOrderId);
 
+        const orderCreatedAt = (parsed.purchaseDate && parsed.purchaseTime)
+          ? `${parsed.purchaseDate}T${parsed.purchaseTime}:00`
+          : Utilities.formatDate(msg.getDate(), OMS_CONFIG.TZ, "yyyy-MM-dd'T'HH:mm:ss");
+
+        const orderSourceEmail = String(msg.getFrom() || '').match(/<([^>]+)>/)?.[1] || msg.getFrom();
+
         const now = new Date();
         const stamp = Utilities.formatDate(now, OMS_CONFIG.TZ, 'yyyy-MM-dd HH:mm:ss');
 
         const rows = [];
         const stubData = [];
         parsed.items.forEach((it, idx) => {
-          const sourceOrderItemId = it.itemId || OMS_Utils.generateLineItemId_(idx + 1);
+          const lineItemIndex = idx + 1;
+          const sourceOrderItemId = it.itemId || OMS_Utils.generateLineItemId_(lineItemIndex);
           const omsOrderItemId = OMS_Utils.buildOmsOrderItemId_(omsOrderId, sourceOrderItemId);
 
           rows.push(inbound_buildRowFromHeaders_(cols, inbound.getLastColumn(), {
             merchantOrderId: sourceOrderId,
             merchantOrderItemId: sourceOrderItemId,
+            lineItemIndex,
             purchaseDate: parsed.purchaseDate,
             purchaseTime: parsed.purchaseTime,
+            orderCreatedAt,
             buyerEmail: parsed.buyerEmail,
             buyerName: parsed.buyerName,
             buyerPhone: parsed.buyerPhone,
             customerId,
             systemGmailId: msgId,
+            orderSourceEmail,
             salesChannel: 'Imweb',
             customerClassification: 'Active',
             isBusinessOrder: 'false',
             sku: it.sku || 'IMWEB-UNMAPPED',
-            productName: it.productName,
+            productName: OMS_Utils.decodeHtmlEntities_(it.productName),
             magSafeStand: it.magSafeStand,
             model: it.model,
             clubType: it.clubType,
+            productCategory: 'Golf Club',
             hand: it.hand,
             flex: it.flex,
-            length: it.length,
+            shaftLengthOption: it.length,
             gripSize: it.gripSize,
             qty: it.quantity || 1,
             currency: 'KRW',
@@ -370,6 +394,8 @@ function inbound_runImweb() {
             omsOrderId,
             omsOrderItemId,
             magSafeStand: it.magSafeStand,
+            orderCreatedAt,
+            deliveryCountry: parsed.shipCountry || 'South Korea',
           });
         });
 
@@ -531,13 +557,20 @@ function inbound_runSamCart() {
         const sourceOrderId = parsed.orderId;
         const omsOrderId = OMS_Utils.buildOmsOrderId_(sourceSystem, sourceOrderId);
 
+        const orderCreatedAt = (parsed.purchaseDate && parsed.purchaseTime)
+          ? `${parsed.purchaseDate}T${parsed.purchaseTime}:00`
+          : Utilities.formatDate(msgDate, OMS_CONFIG.TZ, "yyyy-MM-dd'T'HH:mm:ss");
+
+        const orderSourceEmail = String(msg.getFrom() || '').match(/<([^>]+)>/)?.[1] || msg.getFrom();
+
         const now = new Date();
         const stamp = Utilities.formatDate(now, OMS_CONFIG.TZ, 'yyyy-MM-dd HH:mm:ss');
 
         const rows = [];
         const stubData = [];
         parsed.items.forEach((it, idx) => {
-          const sourceOrderItemId = OMS_Utils.generateLineItemId_(idx + 1);
+          const lineItemIndex = idx + 1;
+          const sourceOrderItemId = OMS_Utils.generateLineItemId_(lineItemIndex);
           const omsOrderItemId = OMS_Utils.buildOmsOrderItemId_(omsOrderId, sourceOrderItemId);
 
           // Derive SKU if not present or placeholder
@@ -549,9 +582,11 @@ function inbound_runSamCart() {
             // core ids
             merchantOrderId: sourceOrderId,
             merchantOrderItemId: sourceOrderItemId,
+            lineItemIndex,
 
             purchaseDate: parsed.purchaseDate,
             purchaseTime: parsed.purchaseTime,
+            orderCreatedAt,
 
             buyerEmail: parsed.buyerEmail,
             buyerName: parsed.buyerName,
@@ -559,19 +594,21 @@ function inbound_runSamCart() {
 
             customerId,
             systemGmailId: msgId,
+            orderSourceEmail,
 
             salesChannel: 'SamCart',
             customerClassification: 'Active',
             isBusinessOrder: 'false',
 
             sku: it.sku,
-            productName: it.productName || parsed.productName,
+            productName: OMS_Utils.decodeHtmlEntities_(it.productName || parsed.productName),
             magSafeStand: it.magSafeStand,
             model: it.model || parsed.model,
             clubType: it.clubType || parsed.clubType,
+            productCategory: 'Golf Club',
             hand: it.hand || parsed.hand,
             flex: it.flex || parsed.flex,
-            length: it.length || parsed.length,
+            shaftLengthOption: it.length || parsed.length,
             gripSize: it.gripSize || parsed.gripSize,
 
             qty: it.quantity || parsed.quantity || 1,
@@ -622,6 +659,8 @@ function inbound_runSamCart() {
             omsOrderId,
             omsOrderItemId,
             magSafeStand: it.magSafeStand,
+            orderCreatedAt,
+            deliveryCountry: parsed.shipCountry || 'United States',
           });
         });
 
@@ -688,7 +727,18 @@ function inbound_parseSamCartInvoice_(text, purchaseTime) {
     t.match(/Date:\s*([A-Z][a-z]+ \d{1,2}, \d{4})/i);
 
   const purchaseDate = dateMatch ? normalizeDateYYYYMMDD_(dateMatch[1]) : '';
-  // purchaseTime passed from caller context
+
+  // Parse Time from: Mar 2, 2026 at 6:03 AM
+  let pTime = purchaseTime || '';
+  const timeMatch = t.match(/(?:at\s*)(\d{1,2}:\d{2}\s*(?:AM|PM))/i);
+  if (timeMatch) {
+    const raw = timeMatch[1].toUpperCase();
+    const [h, m] = raw.replace(/\s*(?:AM|PM)/, '').split(':');
+    let hour = parseInt(h);
+    if (raw.includes('PM') && hour < 12) hour += 12;
+    if (raw.includes('AM') && hour === 12) hour = 0;
+    pTime = `${String(hour).padStart(2, '0')}:${m}`;
+  }
 
   // Customer name/email
   const cust = t.match(/Customer\s*\n([^\n]+)\n([^\n]+@\S+)/i);
@@ -705,9 +755,9 @@ function inbound_parseSamCartInvoice_(text, purchaseTime) {
 
   // Phone
   const phoneMatch =
-    t.match(/(?:Phone|delivery\.):\s*([\d\+\-\s\(\)]{7,20})/i) ||
-    t.match(/Customer\s*\n.*\n.*\n(\+?[\d\s-]{7,20})/i);
-  const buyerPhone = phoneMatch ? String(phoneMatch[1]).trim().replace(/\s/g, '') : '';
+    t.match(/(?:Phone|delivery\.):\s*(\+?\d[\d\s\-\(\)]{7,15})/i) ||
+    t.match(/Customer\s*\n.*\n.*\n(\+?[\d\s\-\(\)]{7,15})/i);
+  const buyerPhone = phoneMatch ? String(phoneMatch[1]).trim().replace(/\s/g, '').slice(0, 15) : '';
 
   // Ship To block
   let shipAddr1 = '', shipCity = '', shipState = '', shipPostal = '', shipCountry = 'United States';
@@ -779,7 +829,7 @@ function inbound_parseSamCartInvoice_(text, purchaseTime) {
   return {
     orderId,
     purchaseDate,
-    purchaseTime: purchaseTime || '',
+    purchaseTime: pTime,
     buyerName,
     buyerEmail,
     buyerPhone,
@@ -837,8 +887,10 @@ function inbound_buildRowFromHeaders_(headersMap, lastCol, v) {
 
   OMS_Utils.setByHeader_(row, headersMap, 'merchant-order-id', v.merchantOrderId);
   OMS_Utils.setByHeader_(row, headersMap, 'merchant-order-item-id', v.merchantOrderItemId);
+  OMS_Utils.setByHeader_(row, headersMap, 'line-item-index', v.lineItemIndex);
   OMS_Utils.setByHeader_(row, headersMap, 'purchase-date', v.purchaseDate);
   OMS_Utils.setByHeader_(row, headersMap, 'purchase-time', v.purchaseTime);
+  OMS_Utils.setByHeader_(row, headersMap, 'order-created-at', v.orderCreatedAt);
 
   OMS_Utils.setByHeader_(row, headersMap, 'buyer-email', v.buyerEmail);
   OMS_Utils.setByHeader_(row, headersMap, 'buyer-name', v.buyerName);
@@ -846,6 +898,7 @@ function inbound_buildRowFromHeaders_(headersMap, lastCol, v) {
 
   OMS_Utils.setByHeader_(row, headersMap, 'customer-id', v.customerId);
   OMS_Utils.setByHeader_(row, headersMap, 'system-gmail-id', v.systemGmailId);
+  OMS_Utils.setByHeader_(row, headersMap, 'order-source-email', v.orderSourceEmail);
 
   OMS_Utils.setByHeader_(row, headersMap, 'sales-channel', v.salesChannel);
   OMS_Utils.setByHeader_(row, headersMap, 'customer-classification', v.customerClassification);
@@ -856,9 +909,10 @@ function inbound_buildRowFromHeaders_(headersMap, lastCol, v) {
   OMS_Utils.setByHeader_(row, headersMap, 'mag-safe-stand', v.magSafeStand);
   OMS_Utils.setByHeader_(row, headersMap, 'model', v.model);
   OMS_Utils.setByHeader_(row, headersMap, 'club-type', v.clubType);
+  OMS_Utils.setByHeader_(row, headersMap, 'product-category', v.productCategory);
   OMS_Utils.setByHeader_(row, headersMap, 'hand', v.hand);
   OMS_Utils.setByHeader_(row, headersMap, 'flex', v.flex);
-  OMS_Utils.setByHeader_(row, headersMap, 'length', v.length);
+  OMS_Utils.setByHeader_(row, headersMap, 'shaft-length-option', v.shaftLengthOption);
   OMS_Utils.setByHeader_(row, headersMap, 'grip-size', v.gripSize);
 
   OMS_Utils.setByHeader_(row, headersMap, 'quantity-purchased', v.qty);
