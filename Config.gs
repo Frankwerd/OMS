@@ -5,7 +5,17 @@ const OMS_CONFIG = {
   // Standalone script: REQUIRED
   SPREADSHEET_ID: '1I7l8LrFjdNQePw5gcVBiSoKAm3RdX9wqmUbHVFV4tuA',
 
+  SCHEMA_VERSION: '1.1.0',
+
   TZ: Session.getScriptTimeZone(),
+
+  ERRORS: {
+    MISSING_ORDER_ID: 'ERR_NO_ORDER_ID',
+    MISSING_EMAIL: 'ERR_NO_EMAIL',
+    MISSING_ADDRESS: 'ERR_NO_ADDRESS',
+    AMBIGUOUS_ITEMS: 'ERR_AMBIGUOUS_ITEMS',
+    MISSING_SKU_MAPPING: 'ERR_MISSING_SKU',
+  },
 
   TABS: {
     INBOUND: 'Inbound_Orders',
