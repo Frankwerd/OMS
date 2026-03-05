@@ -157,7 +157,6 @@ function outbound_createStubs_(items) {
       });
     } else {
       out.getRange(out.getLastRow() + 1, 1, 1, row.length)
-        .setNumberFormat('@')
         .setValues([row]);
     }
   });

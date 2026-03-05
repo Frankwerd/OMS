@@ -2,11 +2,11 @@
  * Master.gs
  ********************************/
 
-function refreshMasterOmsView() {
+function refreshMasterOmsTable() {
   const ss = OMS_Utils.ss();
   const inbound = OMS_Utils.sheet_(OMS_CONFIG.TABS.INBOUND);
   const outbound = OMS_Utils.sheet_(OMS_CONFIG.TABS.OUTBOUND);
-  const master = OMS_Utils.sheet_(OMS_CONFIG.TABS.MASTER);
+  const masterTable = OMS_Utils.sheet_(OMS_CONFIG.TABS.MASTER_TABLE);
 
   const inCols = OMS_Utils.requireCols_(inbound, [
     'oms-order-item-id','oms-order-id','source-system','source-order-id','source-order-item-id',
@@ -18,7 +18,8 @@ function refreshMasterOmsView() {
 
   const outCols = OMS_Utils.requireCols_(outbound, [
     'oms-order-item-id','domestic-tracking-kr','hub-received-date','international-tracking-us','carrier-us',
-    'outbound-status','serial-number-scanned','sn-verify','customer-email-status','last-email-at','shipment-id'
+    'outbound-status','serial-number-scanned','sn-verify','customer-email-status','last-email-at','shipment-id',
+    'us-ship-date','delivered-date'
   ]);
 
   // Build outbound map by oms-order-item-id
@@ -33,19 +34,26 @@ function refreshMasterOmsView() {
     });
   }
 
-  const headers = [
-    'oms-order-id','oms-order-item-id','source-system','source-order-id','source-order-item-id',
-    'merchant-order-id','merchant-order-item-id','sku','customer-id','buyer-email-hash','buyer-email','buyer-name',
-    'purchase-date','sales-channel','item-life-cycle','order-life-cycle','replacement-type','replacement-group-id',
-    'quantity-purchased','currency','item-price','item-tax','shipping-price','total-amount','refund-amount','refund-date',
-    'serial-number-allocated','serial-number-scanned','sn-verify',
-    'domestic-tracking-kr','hub-received-date','international-tracking-us','carrier-us',
-    'outbound-status','customer-email-status','last-email-at','shipment-id','notes'
-  ];
+  const headers = OMS_SCHEMA_MASTER_TABLE_();
 
-  master.clear();
-  master.getRange(1,1,1,headers.length).setValues([headers]).setFontWeight('bold').setBackground('#efefef');
-  master.setFrozenRows(1);
+  masterTable.clear();
+  masterTable.getRange(1,1,1,headers.length).setValues([headers]);
+
+  // Style header
+  masterTable.getRange(1, 1, 1, headers.length)
+    .setFontWeight('bold')
+    .setBackground('#111827')
+    .setFontColor('#FFFFFF')
+    .setWrap(true)
+    .setVerticalAlignment('middle');
+
+  masterTable.setRowHeight(1, 36);
+  masterTable.setFrozenRows(1);
+
+  // Safely create filter
+  const existingFilter = masterTable.getFilter();
+  if (existingFilter) existingFilter.remove();
+  masterTable.getRange(1, 1, 1, headers.length).createFilter();
 
   const inLR = inbound.getLastRow();
   if (inLR < 2) return;
@@ -97,6 +105,8 @@ function refreshMasterOmsView() {
       o ? o[outCols['hub-received-date'] - 1] : '',
       o ? o[outCols['international-tracking-us'] - 1] : '',
       o ? o[outCols['carrier-us'] - 1] : '',
+      o ? o[outCols['us-ship-date'] - 1] : '',
+      o ? o[outCols['delivered-date'] - 1] : '',
       o ? o[outCols['outbound-status'] - 1] : '',
       o ? o[outCols['customer-email-status'] - 1] : '',
       o ? o[outCols['last-email-at'] - 1] : '',
@@ -107,6 +117,6 @@ function refreshMasterOmsView() {
   });
 
   if (outRows.length) {
-    master.getRange(2, 1, outRows.length, headers.length).setValues(outRows);
+    masterTable.getRange(2, 1, outRows.length, headers.length).setValues(outRows);
   }
 }

@@ -13,40 +13,45 @@ function omsSetupSheet() {
 
   const inbound = getOrCreateSheet_(ss, OMS_CONFIG.TABS.INBOUND);
   const outbound = getOrCreateSheet_(ss, OMS_CONFIG.TABS.OUTBOUND);
-  const master = getOrCreateSheet_(ss, OMS_CONFIG.TABS.MASTER);
+  const dashboard = getOrCreateSheet_(ss, OMS_CONFIG.TABS.DASHBOARD);
+  const masterTable = getOrCreateSheet_(ss, OMS_CONFIG.TABS.MASTER_TABLE);
   const meta = getOrCreateSheet_(ss, OMS_CONFIG.TABS.META);
 
   // IMPORTANT:
   // Inbound/Outbound get filters (table sheets)
-  // Master dashboard gets NO filter (merge-safe)
+  // Dashboard gets NO filter (merge-safe)
   // clearAll = false to preserve manual data while adding missing schema columns.
   applyHeaderRow_(inbound, OMS_SCHEMA_INBOUND_(), { createFilter: true, clearAll: false });
   applyHeaderRow_(outbound, OMS_SCHEMA_OUTBOUND_(), { createFilter: true, clearAll: false });
-  applyHeaderRow_(master, OMS_SCHEMA_MASTER_(), { createFilter: false, clearAll: true }); // Dashboard can be cleared
+  applyHeaderRow_(dashboard, OMS_SCHEMA_DASHBOARD_(), { createFilter: false, clearAll: true });
+  applyHeaderRow_(masterTable, OMS_SCHEMA_MASTER_TABLE_(), { createFilter: true, clearAll: true });
 
   updateMetaSheet_(ss, meta, {
     [OMS_CONFIG.TABS.INBOUND]: OMS_SCHEMA_INBOUND_(),
     [OMS_CONFIG.TABS.OUTBOUND]: OMS_SCHEMA_OUTBOUND_(),
+    [OMS_CONFIG.TABS.MASTER_TABLE]: OMS_SCHEMA_MASTER_TABLE_(),
   });
   meta.hideSheet();
 
   styleInbound_(inbound);
   styleOutbound_(outbound);
 
-  buildDashboard_(master); // does merges safely because master has no filter
+  buildDashboard_(dashboard); // does merges safely because dashboard has no filter
+  refreshMasterOmsTable(); // Generate the master table content
 
   inbound.setTabColor('#1E3A8A');
   outbound.setTabColor('#047857');
-  master.setTabColor('#111827');
+  dashboard.setTabColor('#111827');
+  masterTable.setTabColor('#374151');
 
   SpreadsheetApp.flush();
 }
 
 function omsRefreshDashboard() {
   const ss = OMS_Utils.ss();
-  const master = ss.getSheetByName(OMS_CONFIG.TABS.MASTER);
-  if (!master) throw new Error('Master_OMS_View not found. Run omsSetupSheet() first.');
-  buildDashboard_(master);
+  const dashboard = ss.getSheetByName(OMS_CONFIG.TABS.DASHBOARD);
+  if (!dashboard) throw new Error('Dashboard sheet not found. Run omsSetupSheet() first.');
+  buildDashboard_(dashboard);
   SpreadsheetApp.flush();
 }
 
@@ -81,9 +86,22 @@ function OMS_SCHEMA_OUTBOUND_() {
   ];
 }
 
-function OMS_SCHEMA_MASTER_() {
+function OMS_SCHEMA_DASHBOARD_() {
   // Dashboard sheet doesn’t need a big table header; it’s a layout sheet.
   return ['metric','value','notes'];
+}
+
+function OMS_SCHEMA_MASTER_TABLE_() {
+  return [
+    'oms-order-id','oms-order-item-id','source-system','source-order-id','source-order-item-id',
+    'merchant-order-id','merchant-order-item-id','sku','customer-id','buyer-email-hash','buyer-email','buyer-name',
+    'purchase-date','sales-channel','item-life-cycle','order-life-cycle','replacement-type','replacement-group-id',
+    'quantity-purchased','currency','item-price','item-tax','shipping-price','total-amount','refund-amount','refund-date',
+    'serial-number-allocated','serial-number-scanned','sn-verify',
+    'domestic-tracking-kr','hub-received-date','international-tracking-us','carrier-us',
+    'us-ship-date','delivered-date',
+    'outbound-status','customer-email-status','last-email-at','shipment-id','notes'
+  ];
 }
 
 /** ---------------- SHEET HELPERS ---------------- **/
