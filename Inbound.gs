@@ -729,15 +729,13 @@ function inbound_parseSamCartInvoice_(text, purchaseTime) {
   }
 
   // Specs (same as legacy)
-  let model = u.includes('PRO') ? 'Pro' : 'Basic';
-  let clubType = u.includes('WOOD') ? 'Wood' : (u.includes('IRON') ? 'Iron' : '7-iron');
+  let model = 'Basic';
+  if (/\bPRO\b/i.test(t)) model = 'Pro';
+  else if (/\bBASIC\b/i.test(t)) model = 'Basic';
 
-  if (!u.includes('PRO') && !u.includes('BASIC')) {
-    model = "Basic";
-  }
-  if (!u.includes('WOOD') && !u.includes('IRON')) {
-    clubType = "7-iron";
-  }
+  let clubType = '7-iron';
+  if (/\bWOOD\b/i.test(t)) clubType = 'Wood';
+  else if (/\bIRON\b/i.test(t)) clubType = 'Iron';
   const flex = (u.includes('L-FLEX') || u.includes('LADIE')) ? 'L' : (u.includes('R-FLEX') || u.includes('REGULAR')) ? 'R' : 'S';
   const gripSize = (u.includes('MIDSIZE') || u.includes('MID SIZE')) ? 'Mid' : 'Standard';
   const length = u.includes('LONGER') ? 'Longer' : 'Standard';
