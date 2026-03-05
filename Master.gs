@@ -49,6 +49,10 @@ function refreshMasterOmsTable() {
 
   masterTable.setRowHeight(1, 36);
   masterTable.setFrozenRows(1);
+
+  // Safely create filter
+  const existingFilter = masterTable.getFilter();
+  if (existingFilter) existingFilter.remove();
   masterTable.getRange(1, 1, 1, headers.length).createFilter();
 
   const inLR = inbound.getLastRow();
