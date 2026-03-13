@@ -33,6 +33,9 @@ function outbound_onEdit(e) {
 
   // Velocity Automation: set status based on dates
   outbound_updateStatusFromDates_(sheet, row, cols, col);
+
+  // Timeline tracking
+  outbound_updateStageTimeline_(sheet, row, cols, col);
 }
 
 /**
@@ -66,6 +69,98 @@ function outbound_updateStatusFromDates_(sheet, row, cols, editedCol) {
   if (newStatus) {
     sheet.getRange(row, statusCol).setValue(newStatus);
   }
+}
+
+/**
+ * Create Outbound stubs for Inbound items
+ */
+function outbound_createStubs_(items) {
+  if (!items || !items.length) return;
+
+  const out = OMS_Utils.sheet_(OMS_CONFIG.TABS.OUTBOUND);
+  const cols = OMS_Utils.getHeadersMap_(out);
+  const omsIidCol = cols['oms-order-item-id'];
+  if (!omsIidCol) {
+    OMS_Utils.opsAlert_('Outbound stub creation failed: oms-order-item-id column not found.');
+    return;
+  }
+
+  const lr = out.getLastRow();
+  const existingMap = {};
+  if (lr >= 2) {
+    const ids = out.getRange(2, omsIidCol, lr - 1, 1).getValues();
+    ids.forEach((r, i) => {
+      const id = String(r[0] || '').trim();
+      if (id) existingMap[id] = i + 2;
+    });
+  }
+
+  const stamp = Utilities.formatDate(new Date(), OMS_CONFIG.TZ, 'yyyy-MM-dd HH:mm:ss');
+
+  items.forEach(it => {
+    const row = new Array(out.getLastColumn()).fill('');
+
+    OMS_Utils.setByHeader_(row, cols, 'merchant-order-id', it.merchantOrderId);
+    OMS_Utils.setByHeader_(row, cols, 'merchant-order-item-id', it.merchantOrderItemId);
+    OMS_Utils.setByHeader_(row, cols, 'sku', it.sku);
+    OMS_Utils.setByHeader_(row, cols, 'customer-id', it.customerId);
+    OMS_Utils.setByHeader_(row, cols, 'order-created-at', it.orderCreatedAt);
+    OMS_Utils.setByHeader_(row, cols, 'delivery-country', it.deliveryCountry);
+    OMS_Utils.setByHeader_(row, cols, 'outbound-workflow-type', 'DIRECT_SHIP');
+    OMS_Utils.setByHeader_(row, cols, 'outbound-status', 'CREATED');
+    OMS_Utils.setByHeader_(row, cols, 'oms-order-id', it.omsOrderId);
+    OMS_Utils.setByHeader_(row, cols, 'oms-order-item-id', it.omsOrderItemId);
+    OMS_Utils.setByHeader_(row, cols, 'shipment-id', `${it.omsOrderItemId}:DIRECT_SHIP:001`);
+    OMS_Utils.setByHeader_(row, cols, 'stage-timeline', `CREATED — ${it.orderCreatedAt || stamp}`);
+
+    // Package defaults based on stand
+    if (it.magSafeStand === 'Yes' || it.magSafeStand === '1') {
+      OMS_Utils.setByHeader_(row, cols, 'package-type', 'club-with-stand');
+      OMS_Utils.setByHeader_(row, cols, 'actual-weight-kg', OMS_CONFIG.STAND_DEFAULTS.WEIGHT_KG);
+      OMS_Utils.setByHeader_(row, cols, 'package-length-cm', OMS_CONFIG.STAND_DEFAULTS.LENGTH_CM);
+      OMS_Utils.setByHeader_(row, cols, 'package-width-cm', OMS_CONFIG.STAND_DEFAULTS.WIDTH_CM);
+      OMS_Utils.setByHeader_(row, cols, 'package-height-cm', OMS_CONFIG.STAND_DEFAULTS.HEIGHT_CM);
+      OMS_Utils.setByHeader_(row, cols, 'notes', 'Stand included.');
+    } else {
+      OMS_Utils.setByHeader_(row, cols, 'package-type', 'standard-club');
+      OMS_Utils.setByHeader_(row, cols, 'actual-weight-kg', OMS_CONFIG.PACKAGE_DEFAULTS.WEIGHT_KG);
+      OMS_Utils.setByHeader_(row, cols, 'package-length-cm', OMS_CONFIG.PACKAGE_DEFAULTS.LENGTH_CM);
+      OMS_Utils.setByHeader_(row, cols, 'package-width-cm', OMS_CONFIG.PACKAGE_DEFAULTS.WIDTH_CM);
+      OMS_Utils.setByHeader_(row, cols, 'package-height-cm', OMS_CONFIG.PACKAGE_DEFAULTS.HEIGHT_CM);
+    }
+
+    OMS_Utils.setByHeader_(row, cols, 'system-updated-at', stamp);
+
+    const existingRow = existingMap[it.omsOrderItemId];
+    if (existingRow) {
+      // Upsert: Only update core stub fields to avoid wiping out tracking/dates
+      const stubHeaders = [
+        'merchant-order-id','merchant-order-item-id','sku','customer-id',
+        'order-created-at','delivery-country',
+        'outbound-workflow-type','oms-order-id','oms-order-item-id',
+        'system-updated-at'
+      ];
+      // Also update package defaults if they are blank in the existing row
+      // but for simplicity, we'll just update these core ones and leave the rest.
+      stubHeaders.forEach(h => {
+        const c = cols[h];
+        if (c) out.getRange(existingRow, c).setValue(row[c - 1]);
+      });
+
+      // Update dimensions if currently empty
+      ['actual-weight-kg','package-length-cm','package-width-cm','package-height-cm','notes'].forEach(h => {
+        const c = cols[h];
+        if (c) {
+          const current = out.getRange(existingRow, c).getValue();
+          if (!current) out.getRange(existingRow, c).setValue(row[c - 1]);
+        }
+      });
+    } else {
+      out.getRange(out.getLastRow() + 1, 1, 1, row.length)
+        .setValues([row]);
+    }
+  });
+  SpreadsheetApp.flush();
 }
 
 function outbound_linkifyRow_(sheet, row, cols) {
@@ -177,6 +272,51 @@ function outbound_sendFinalDeliveryEmail_(outboundRow) {
     out.getRange(outboundRow, outCols['notes']).setValue(`Email error: ${err.message}`.slice(0, 200));
     OMS_Utils.opsAlert_(`Final email FAILED\noms-order-item-id: ${omsItem}\nError: ${err.message}`);
   }
+}
+
+/**
+ * Stage Timeline Tracking
+ * Appends human-readable stage updates to stage-timeline column
+ */
+function outbound_updateStageTimeline_(sheet, row, cols, editedCol) {
+  const timelineCol = OMS_Utils.col_(cols, 'stage-timeline');
+  if (!timelineCol) return;
+
+  const fields = {
+    'hub-received-date': 'Hub received',
+    'us-ship-date': 'US shipped',
+    'delivered-date': 'Delivered',
+    'domestic-tracking-kr': 'KR Tracking',
+    'international-tracking-us': 'US Tracking'
+  };
+
+  const fieldKeys = Object.keys(fields);
+  const relevantCols = fieldKeys.map(k => OMS_Utils.col_(cols, k));
+
+  if (!relevantCols.includes(editedCol)) return;
+
+  const timelineRange = sheet.getRange(row, timelineCol);
+
+  // Rebuild timeline deterministically based on current values of all tracked fields.
+  const events = [];
+
+  // Initial event
+  const createdAtCol = OMS_Utils.col_(cols, 'order-created-at');
+  if (createdAtCol) {
+    const createdVal = sheet.getRange(row, createdAtCol).getDisplayValue();
+    if (createdVal) events.push(`CREATED — ${createdVal}`);
+  }
+
+  fieldKeys.forEach(k => {
+    const c = OMS_Utils.col_(cols, k);
+    if (!c) return;
+    const val = sheet.getRange(row, c).getDisplayValue();
+    if (val) {
+      events.push(`${fields[k]} — ${val}`);
+    }
+  });
+
+  timelineRange.setValue(events.join('\n'));
 }
 
 function findBuyer_(sheet, cols, omsItem) {
