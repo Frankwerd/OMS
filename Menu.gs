@@ -7,7 +7,7 @@ function onOpen() {
     .addItem('Setup Sheet', 'omsSetupSheet')
     .addSeparator()
     .addItem('Refresh Dashboard', 'omsRefreshDashboard')
-    .addItem('Refresh Master Table', 'refreshMasterOmsTable')
+    .addItem('Refresh Master View', 'refreshMasterOmsView')
     .addSeparator()
     .addItem('Migrate Legacy Inbound', 'migrateInboundLegacyToNew')
     .addItem('Migrate Legacy Outbound', 'migrateOutboundLegacyToNew')

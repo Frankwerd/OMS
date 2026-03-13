@@ -2,7 +2,7 @@
  * Master.gs
  ********************************/
 
-function refreshMasterOmsTable(optStart, optEnd) {
+function refreshMasterOmsView(optStart, optEnd) {
   const ss = OMS_Utils.ss();
   
   let startDate = optStart || null;
@@ -11,7 +11,7 @@ function refreshMasterOmsTable(optStart, optEnd) {
   // 1. Prompt for date range if not provided
   if (!startDate) {
     const ui = SpreadsheetApp.getUi();
-    const response = ui.prompt('Refresh Master Table', 'Enter date range (e.g. 2024-01-01 to 2024-01-31) or leave blank for all:', ui.ButtonSet.OK_CANCEL);
+    const response = ui.prompt('Refresh Master View', 'Enter date range (e.g. 2024-01-01 to 2024-01-31) or leave blank for all:', ui.ButtonSet.OK_CANCEL);
     if (response.getSelectedButton() !== ui.Button.OK) return;
 
     const input = response.getResponseText().trim();
@@ -37,7 +37,7 @@ function refreshMasterOmsTable(optStart, optEnd) {
 
   const inbound = OMS_Utils.sheet_(OMS_CONFIG.TABS.INBOUND);
   const outbound = OMS_Utils.sheet_(OMS_CONFIG.TABS.OUTBOUND);
-  const masterTable = OMS_Utils.sheet_(OMS_CONFIG.TABS.MASTER_TABLE);
+  const masterView = OMS_Utils.sheet_(OMS_CONFIG.TABS.MASTER_VIEW);
 
   const inCols = OMS_Utils.requireCols_(inbound, [
     'oms-order-item-id','oms-order-id','source-system','source-order-id','source-order-item-id',
@@ -65,26 +65,26 @@ function refreshMasterOmsTable(optStart, optEnd) {
     });
   }
 
-  const headers = OMS_SCHEMA_MASTER_TABLE_();
+  const headers = OMS_SCHEMA_MASTER_VIEW_();
 
-  masterTable.clear();
-  masterTable.getRange(1,1,1,headers.length).setValues([headers]);
+  masterView.clear();
+  masterView.getRange(1,1,1,headers.length).setValues([headers]);
 
   // Style header
-  masterTable.getRange(1, 1, 1, headers.length)
+  masterView.getRange(1, 1, 1, headers.length)
     .setFontWeight('bold')
     .setBackground('#111827')
     .setFontColor('#FFFFFF')
     .setWrap(true)
     .setVerticalAlignment('middle');
 
-  masterTable.setRowHeight(1, 36);
-  masterTable.setFrozenRows(1);
+  masterView.setRowHeight(1, 36);
+  masterView.setFrozenRows(1);
 
   // Safely create filter
-  const existingFilter = masterTable.getFilter();
+  const existingFilter = masterView.getFilter();
   if (existingFilter) existingFilter.remove();
-  masterTable.getRange(1, 1, 1, headers.length).createFilter();
+  masterView.getRange(1, 1, 1, headers.length).createFilter();
 
   const inLR = inbound.getLastRow();
   if (inLR < 2) return;
@@ -162,6 +162,6 @@ function refreshMasterOmsTable(optStart, optEnd) {
   });
 
   if (outRows.length) {
-    masterTable.getRange(2, 1, outRows.length, headers.length).setValues(outRows);
+    masterView.getRange(2, 1, outRows.length, headers.length).setValues(outRows);
   }
 }

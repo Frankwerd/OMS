@@ -11,7 +11,7 @@ function omsSetupSheet() {
   const inbound = getOrCreateSheet_(ss, OMS_CONFIG.TABS.INBOUND);
   const outbound = getOrCreateSheet_(ss, OMS_CONFIG.TABS.OUTBOUND);
   const dashboard = getOrCreateSheet_(ss, OMS_CONFIG.TABS.DASHBOARD);
-  const masterTable = getOrCreateSheet_(ss, OMS_CONFIG.TABS.MASTER_TABLE);
+  const masterView = getOrCreateSheet_(ss, OMS_CONFIG.TABS.MASTER_VIEW);
   const meta = getOrCreateSheet_(ss, OMS_CONFIG.TABS.META);
 
   // IMPORTANT:
@@ -21,12 +21,12 @@ function omsSetupSheet() {
   applyHeaderRow_(inbound, OMS_SCHEMA_INBOUND_(), { createFilter: true, clearAll: false });
   applyHeaderRow_(outbound, OMS_SCHEMA_OUTBOUND_(), { createFilter: true, clearAll: false });
   applyHeaderRow_(dashboard, OMS_SCHEMA_DASHBOARD_(), { createFilter: false, clearAll: true });
-  applyHeaderRow_(masterTable, OMS_SCHEMA_MASTER_TABLE_(), { createFilter: true, clearAll: true });
+  applyHeaderRow_(masterView, OMS_SCHEMA_MASTER_VIEW_(), { createFilter: true, clearAll: true });
 
   updateMetaSheet_(ss, meta, {
     [OMS_CONFIG.TABS.INBOUND]: OMS_SCHEMA_INBOUND_(),
     [OMS_CONFIG.TABS.OUTBOUND]: OMS_SCHEMA_OUTBOUND_(),
-    [OMS_CONFIG.TABS.MASTER_TABLE]: OMS_SCHEMA_MASTER_TABLE_(),
+    [OMS_CONFIG.TABS.MASTER_VIEW]: OMS_SCHEMA_MASTER_VIEW_(),
   });
   meta.hideSheet();
 
@@ -34,12 +34,12 @@ function omsSetupSheet() {
   styleOutbound_(outbound);
 
   buildDashboard_(dashboard); // does merges safely because dashboard has no filter
-  refreshMasterOmsTable(); // Generate the master table content
+  refreshMasterOmsView(); // Generate the master view content
 
   inbound.setTabColor('#1E3A8A');
   outbound.setTabColor('#047857');
   dashboard.setTabColor('#111827');
-  masterTable.setTabColor('#374151');
+  masterView.setTabColor('#374151');
 
   // Validate after setup/repair
   validateSchema(ss);
@@ -78,8 +78,8 @@ function omsRefreshDashboard() {
     }
   }
 
-  // Ensure Master Table is refreshed with the same range
-  refreshMasterOmsTable(startDate, endDate);
+  // Ensure Master View is refreshed with the same range
+  refreshMasterOmsView(startDate, endDate);
 
   buildDashboard_(dashboard);
   SpreadsheetApp.flush();
@@ -121,7 +121,7 @@ function OMS_SCHEMA_DASHBOARD_() {
   return ['metric','value','notes'];
 }
 
-function OMS_SCHEMA_MASTER_TABLE_() {
+function OMS_SCHEMA_MASTER_VIEW_() {
   return [
     'oms-order-id','oms-order-item-id','source-system','source-order-id','source-order-item-id',
     'merchant-order-id','merchant-order-item-id','sku','customer-id','buyer-email-hash','buyer-email','buyer-name',
@@ -628,9 +628,9 @@ function buildDashboard_(sheet) {
   sheet.getRange(5, 3).setValue('Notes').setFontWeight('bold');
   sheet.getRange(5, 1, 1, 3).setBackground('#EFEFEF');
 
-  const MST_NAME = OMS_CONFIG.TABS.MASTER_TABLE;
+  const MST_NAME = OMS_CONFIG.TABS.MASTER_VIEW;
   const mstSheet = ss.getSheetByName(MST_NAME);
-  if (!mstSheet) throw new Error('Master Table not found.');
+  if (!mstSheet) throw new Error('Master View not found.');
   
   const mstMap = OMS_Utils.getHeadersMap_(mstSheet);
   const mstCol = (h) => {
