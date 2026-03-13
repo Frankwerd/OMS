@@ -2,33 +2,38 @@
  * Master.gs
  ********************************/
 
-function refreshMasterOmsTable() {
+function refreshMasterOmsTable(optStart, optEnd) {
   const ss = OMS_Utils.ss();
-  const ui = SpreadsheetApp.getUi();
 
-  // 1. Prompt for date range
-  let startDate = null, endDate = null;
-  const response = ui.prompt('Refresh Master Table', 'Enter date range (e.g. 2024-01-01 to 2024-01-31) or leave blank for all:', ui.ButtonSet.OK_CANCEL);
-  if (response.getSelectedButton() !== ui.Button.OK) return;
+  let startDate = optStart || null;
+  let endDate = optEnd || null;
 
-  const input = response.getResponseText().trim();
-  if (input) {
-    const parts = input.split(/ to | - |,/i);
-    startDate = new Date(parts[0].trim());
-    if (parts.length > 1) {
-      endDate = new Date(parts[1].trim());
-    } else {
-      endDate = new Date(startDate); // Single day
-    }
-    // Set boundaries to start/end of day
-    if (!isNaN(startDate.getTime())) startDate.setHours(0,0,0,0);
-    if (!isNaN(endDate.getTime())) endDate.setHours(23,59,59,999);
+  // 1. Prompt for date range if not provided
+  if (!startDate) {
+    const ui = SpreadsheetApp.getUi();
+    const response = ui.prompt('Refresh Master Table', 'Enter date range (e.g. 2024-01-01 to 2024-01-31) or leave blank for all:', ui.ButtonSet.OK_CANCEL);
+    if (response.getSelectedButton() !== ui.Button.OK) return;
 
-    if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
-      ui.alert('Invalid date format. Proceeding with all records.');
-      startDate = null; endDate = null;
+    const input = response.getResponseText().trim();
+    if (input) {
+      const parts = input.split(/ to | - |,/i);
+      startDate = new Date(parts[0].trim());
+      if (parts.length > 1) {
+        endDate = new Date(parts[1].trim());
+      } else {
+        endDate = new Date(startDate); // Single day
+      }
+
+      if (isNaN(startDate.getTime()) || (endDate && isNaN(endDate.getTime()))) {
+        ui.alert('Invalid date format. Proceeding with all records.');
+        startDate = null; endDate = null;
+      }
     }
   }
+
+  // Normalize boundaries to start/end of day
+  if (startDate instanceof Date && !isNaN(startDate.getTime())) startDate.setHours(0,0,0,0);
+  if (endDate instanceof Date && !isNaN(endDate.getTime())) endDate.setHours(23,59,59,999);
 
   const inbound = OMS_Utils.sheet_(OMS_CONFIG.TABS.INBOUND);
   const outbound = OMS_Utils.sheet_(OMS_CONFIG.TABS.OUTBOUND);
@@ -102,6 +107,13 @@ function refreshMasterOmsTable() {
     const serialScanned = o ? String(o[outCols['serial-number-scanned'] - 1] || '').trim() : '';
     const snVerify = o ? String(o[outCols['sn-verify'] - 1] || '').trim() : '';
 
+    const toDate_ = (val) => {
+      if (!val) return '';
+      if (val instanceof Date) return val;
+      const d = new Date(val);
+      return isNaN(d.getTime()) ? val : d;
+    };
+
     outRows.push([
       inRow[inCols['oms-order-id'] - 1],
       omsItem,
@@ -115,7 +127,7 @@ function refreshMasterOmsTable() {
       inRow[inCols['buyer-email-hash'] - 1],
       inRow[inCols['buyer-email'] - 1],
       inRow[inCols['buyer-name'] - 1],
-      inRow[inCols['purchase-date'] - 1],
+      toDate_(inRow[inCols['purchase-date'] - 1]),
       inRow[inCols['sales-channel'] - 1],
       inRow[inCols['item-life-cycle'] - 1],
       inRow[inCols['order-life-cycle'] - 1],
@@ -128,18 +140,18 @@ function refreshMasterOmsTable() {
       inRow[inCols['shipping-price'] - 1],
       inRow[inCols['total-amount'] - 1],
       inRow[inCols['refund-amount'] - 1],
-      inRow[inCols['refund-date'] - 1],
+      toDate_(inRow[inCols['refund-date'] - 1]),
       inRow[inCols['serial-number-allocated'] - 1],
 
       serialScanned,
       snVerify,
 
       o ? o[outCols['domestic-tracking-kr'] - 1] : '',
-      o ? o[outCols['hub-received-date'] - 1] : '',
+      o ? toDate_(o[outCols['hub-received-date'] - 1]) : '',
       o ? o[outCols['international-tracking-us'] - 1] : '',
       o ? o[outCols['carrier-us'] - 1] : '',
-      o ? o[outCols['us-ship-date'] - 1] : '',
-      o ? o[outCols['delivered-date'] - 1] : '',
+      o ? toDate_(o[outCols['us-ship-date'] - 1]) : '',
+      o ? toDate_(o[outCols['delivered-date'] - 1]) : '',
       o ? o[outCols['outbound-status'] - 1] : '',
       o ? o[outCols['customer-email-status'] - 1] : '',
       o ? o[outCols['last-email-at'] - 1] : '',

@@ -57,8 +57,10 @@ function omsRefreshDashboard() {
   if (response.getSelectedButton() !== ui.Button.OK) return;
 
   const input = response.getResponseText().trim();
+  let startDate = dashboard.getRange('B3').getValue();
+  let endDate = dashboard.getRange('D3').getValue();
+
   if (input) {
-    let startDate = null, endDate = null;
     const parts = input.split(/ to | - |,/i);
     startDate = new Date(parts[0].trim());
     if (parts.length > 1) {
@@ -72,8 +74,13 @@ function omsRefreshDashboard() {
       dashboard.getRange('D3').setValue(endDate);
     } else {
       ui.alert('Invalid date format. Proceeding with current dates.');
+      startDate = dashboard.getRange('B3').getValue();
+      endDate = dashboard.getRange('D3').getValue();
     }
   }
+
+  // Ensure Master Table is refreshed with the same range
+  refreshMasterOmsTable(startDate, endDate);
 
   buildDashboard_(dashboard);
   SpreadsheetApp.flush();
@@ -622,13 +629,17 @@ function buildDashboard_(sheet) {
   sheet.getRange(5, 3).setValue('Notes').setFontWeight('bold');
   sheet.getRange(5, 1, 1, 3).setBackground('#EFEFEF');
 
-  const MST = OMS_CONFIG.TABS.MASTER_TABLE;
-  const META = OMS_CONFIG.TABS.META;
+  const MST_NAME = OMS_CONFIG.TABS.MASTER_TABLE;
+  const mstSheet = ss.getSheetByName(MST_NAME);
+  if (!mstSheet) throw new Error('Master Table not found.');
 
-  const lookup_ = (s, h) => `INDEX('${META}'!$D$1:$D, MATCH("${s}|${h}", INDEX('${META}'!$A$1:$A & "|" & '${META}'!$B$1:$B, 0), 0))`;
-  const col_ = (s, h) => `INDIRECT("'"&"${s}"&"'!" & ${lookup_(s, h)} & ":" & ${lookup_(s, h)})`;
-
-  const mstCol = (h) => col_(MST, h);
+  const mstMap = OMS_Utils.getHeadersMap_(mstSheet);
+  const mstCol = (h) => {
+    const c = mstMap[h.toLowerCase()];
+    if (!c) return `'${MST_NAME}'!$A2:$A`; // Fallback
+    const letter = OMS_Utils.columnLetter_(c);
+    return `'${MST_NAME}'!$${letter}2:$${letter}`;
+  };
 
   let r = 6;
 
@@ -636,9 +647,9 @@ function buildDashboard_(sheet) {
   const mstPD = mstCol('purchase-date');
   const dateFilter = `${mstPD},">="&$B$3,${mstPD},"<="&$D$3`;
 
-  putMetric_(sheet, r++, 'Inbound Items (In Range)', `=COUNTIFS(${dateFilter})`, '');
-  putMetric_(sheet, r++, 'Outbound US Shipped (In Range)', `=COUNTIFS(${mstCol('us-ship-date')},">="&$B$3,${mstCol('us-ship-date')},"<="&$D$3)`, '');
-  putMetric_(sheet, r++, 'Delivered (In Range)', `=COUNTIFS(${mstCol('delivered-date')},">="&$B$3,${mstCol('delivered-date')},"<="&$D$3)`, '');
+  putMetric_(sheet, r++, 'Inbound Items (In Range)', `=IFERROR(COUNTIFS(${dateFilter}), 0)`, '');
+  putMetric_(sheet, r++, 'Outbound US Shipped (In Range)', `=IFERROR(COUNTIFS(${mstCol('us-ship-date')},">="&$B$3,${mstCol('us-ship-date')},"<="&$D$3), 0)`, '');
+  putMetric_(sheet, r++, 'Delivered (In Range)', `=IFERROR(COUNTIFS(${mstCol('delivered-date')},">="&$B$3,${mstCol('delivered-date')},"<="&$D$3), 0)`, '');
 
   r++;
 
@@ -646,9 +657,9 @@ function buildDashboard_(sheet) {
   const mstHD = mstCol('hub-received-date');
   const mstUSD = mstCol('us-ship-date');
   const mstDD = mstCol('delivered-date');
-  const velFilter = `(${mstPD}>=$B$3)*(${mstPD}<=$D$3)`;
+  const velFilter = `(${mstPD}<>"")*(${mstPD}>=$B$3)*(${mstPD}<=$D$3)`;
 
-  putMetric_(sheet, r++, 'Avg Time to Hub (days)', `=IFERROR(AVERAGE(FILTER(${mstHD}-${mstPD}, (${mstHD}<>"")*(${mstPD}<>"")*${velFilter})),"")`, 'purchase → hub-received');
+  putMetric_(sheet, r++, 'Avg Time to Hub (days)', `=IFERROR(AVERAGE(FILTER(${mstHD}-${mstPD}, (${mstHD}<>"")*${velFilter})),"")`, 'purchase → hub-received');
   putMetric_(sheet, r++, 'Avg Customs Clearance (days)', `=IFERROR(AVERAGE(FILTER(${mstUSD}-${mstHD}, (${mstUSD}<>"")*(${mstHD}<>"")*${velFilter})),"")`, 'hub → us-ship');
   putMetric_(sheet, r++, 'Avg Last Mile (days)', `=IFERROR(AVERAGE(FILTER(${mstDD}-${mstUSD}, (${mstDD}<>"")*(${mstUSD}<>"")*${velFilter})),"")`, 'us-ship → delivered');
   putMetric_(sheet, r++, 'Avg Click-to-Door (days)', `=IFERROR(AVERAGE(FILTER(${mstDD}-${mstPD}, (${mstDD}<>"")*(${mstPD}<>"")*${velFilter})),"")`, 'purchase → delivered');
@@ -656,8 +667,8 @@ function buildDashboard_(sheet) {
   r++;
 
   // Backlog Monitor
-  putMetric_(sheet, r++, 'Hub Backlog', `=COUNTIFS(${mstCol('domestic-tracking-kr')},"<>",${mstCol('international-tracking-us')},"")`, 'KR tracking present, US tracking empty');
-  putMetric_(sheet, r++, 'S/N Mismatch Count', `=COUNTIF(${mstCol('sn-verify')},"MISMATCH")`, '');
+  putMetric_(sheet, r++, 'Hub Backlog', `=IFERROR(COUNTIFS(${mstCol('domestic-tracking-kr')},"<>",${mstCol('international-tracking-us')},""), 0)`, 'KR tracking present, US tracking empty');
+  putMetric_(sheet, r++, 'S/N Mismatch Count', `=IFERROR(COUNTIF(${mstCol('sn-verify')},"MISMATCH"), 0)`, '');
 
   r++;
 
@@ -671,7 +682,7 @@ function buildDashboard_(sheet) {
 
   // Customer Loyalty
   const mstEmail = mstCol('buyer-email');
-  putMetric_(sheet, r++, 'Repeat Purchase Rate (%)', `=IFERROR((COUNTIFS(${dateFilter})-COUNTUNIQUE(FILTER(${mstEmail}, (${mstPD}>=$B$3)*(${mstPD}<=$D$3))))/COUNTIFS(${dateFilter}),"")`, 'Total items - unique emails / total items');
+  putMetric_(sheet, r++, 'Repeat Purchase Rate (%)', `=IFERROR((COUNTIFS(${dateFilter})-COUNTUNIQUE(FILTER(${mstEmail}, ${velFilter})))/MAX(1, COUNTIFS(${dateFilter})),"")`, 'Total items - unique emails / total items');
 
   r++;
 
@@ -708,14 +719,20 @@ function buildDashboardData_(sheet, mstCol) {
   sheet.getRange('B2').setValue('Items');
 
   // Dynamic sequence of dates between Start (B3) and End (D3) on Dashboard
-  sheet.getRange('A3').setFormula(`=SEQUENCE('${MST_DASH}'!$D$3 - '${MST_DASH}'!$B$3 + 1, 1, '${MST_DASH}'!$B$3)`);
-  sheet.getRange('B3').setFormula(`=ARRAYFORMULA(COUNTIFS(${mstCol('purchase-date')}, A3:INDEX(A:A, MATCH(9^9, A:A))))`);
+  const seqFormula = `=IFERROR(SEQUENCE('${MST_DASH}'!$D$3 - '${MST_DASH}'!$B$3 + 1, 1, '${MST_DASH}'!$B$3), TODAY())`;
+  sheet.getRange('A3').setFormula(seqFormula);
+
+  // Adjusted to use indirect to prevent range shifting
+  const countFormula = `=IFERROR(ARRAYFORMULA(COUNTIFS(${mstCol('purchase-date')}, A3:INDEX(A:A, MATCH(9^9, A:A)))), 0)`;
+  sheet.getRange('B3').setFormula(countFormula);
 
   // 2. Outbound Status Distribution (Filtered by Range)
   sheet.getRange('D1').setValue('Outbound Status (In Range)');
   const statusCol = mstCol('outbound-status');
   const dateCol = mstCol('purchase-date');
-  const query = `=QUERY({${statusCol}, ${dateCol}}, "SELECT Col1, COUNT(Col1) WHERE Col1 IS NOT NULL AND Col2 >= DATE '"&TEXT('${MST_DASH}'!$B$3,"yyyy-mm-dd")&"' AND Col2 <= DATE '"&TEXT('${MST_DASH}'!$D$3,"yyyy-mm-dd")&"' GROUP BY Col1 LABEL COUNT(Col1) 'Count'", 0)`;
+
+  // Wrapped in IFERROR and ensured query is robust. Used data range starting from row 2.
+  const query = `=IFERROR(QUERY({${statusCol}, ${dateCol}}, "SELECT Col1, COUNT(Col1) WHERE Col1 IS NOT NULL AND Col2 >= DATE '"&TEXT('${MST_DASH}'!$B$3,"yyyy-mm-dd")&"' AND Col2 <= DATE '"&TEXT('${MST_DASH}'!$D$3,"yyyy-mm-dd")&"' GROUP BY Col1 LABEL COUNT(Col1) 'Count'", 0), "No Data")`;
   sheet.getRange('D2').setFormula(query);
 }
 
