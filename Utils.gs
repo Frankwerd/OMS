@@ -136,64 +136,95 @@ var OMS_Utils = {
 
   /********************************
    * Customer ID: CYYYYMMDD-###
-   * Redesigned to scan sheet for max sequence (no ScriptProperties)
+   * Concurrency-safe allocation using LockService and PropertiesService.
+   *
+   * MAINTENANCE NOTES:
+   * 1. The Inbound_Orders sheet is the ultimate source of truth for Customer IDs.
+   * 2. PropertiesService ('LAST_CID_SEQ_YYYYMMDD') acts as a high-speed reservation
+   *    layer to prevent collisions between the time an ID is allocated and when it
+   *    is finally written to the sheet.
+   * 3. Deleting property keys is safe; the system will simply fall back to
+   *    scanning the sheet (though concurrency risk increases briefly).
    ********************************/
   lookupOrCreateCustomerId_(buyerEmail) {
     const email = this.normalizeEmail_(buyerEmail);
     if (!email) throw new Error('Missing buyer-email for customer-id.');
 
-    // Local execution cache to handle multiple items/orders for same NEW customer in one batch
+    // 1. Local execution cache check (fast)
     if (!this._cidCache) this._cidCache = {};
     if (this._cidCache[email]) return this._cidCache[email];
 
-    const inbound = this.sheet_(OMS_CONFIG.TABS.INBOUND);
-    const cols = this.requireCols_(inbound, ['buyer-email', 'customer-id']);
-    const lr = inbound.getLastRow();
-    const todayKey = Utilities.formatDate(new Date(), OMS_CONFIG.TZ, 'yyyyMMdd');
+    // 2. Acquire lock to prevent concurrent allocation collisions
+    const lock = LockService.getScriptLock();
+    try {
+      lock.waitLock(30000); // 30 seconds
 
-    let maxSeq = 0;
-    let foundExisting = null;
+      const inbound = this.sheet_(OMS_CONFIG.TABS.INBOUND);
+      const cols = this.requireCols_(inbound, ['buyer-email', 'customer-id']);
+      const lr = inbound.getLastRow();
+      const todayKey = Utilities.formatDate(new Date(), OMS_CONFIG.TZ, 'yyyyMMdd');
 
-    if (lr >= 2) {
-      const emails = inbound.getRange(2, cols['buyer-email'], lr - 1, 1).getValues();
-      const cids = inbound.getRange(2, cols['customer-id'], lr - 1, 1).getValues();
+      let maxSeq = 0;
+      let foundExisting = null;
 
-      for (let i = 0; i < cids.length; i++) {
-        const rowEmail = this.normalizeEmail_(emails[i][0]);
-        const cid = String(cids[i][0] || '').trim();
+      // 3. Re-scan the sheet AFTER acquiring the lock
+      if (lr >= 2) {
+        const emails = inbound.getRange(2, cols['buyer-email'], lr - 1, 1).getValues();
+        const cids = inbound.getRange(2, cols['customer-id'], lr - 1, 1).getValues();
 
-        // 1. Check if this email already has an ID in the sheet
-        if (rowEmail === email && cid && !foundExisting) {
-          foundExisting = cid;
+        for (let i = 0; i < cids.length; i++) {
+          const rowEmail = this.normalizeEmail_(emails[i][0]);
+          const cid = String(cids[i][0] || '').trim();
+
+          // Check if email already has an ID in the sheet
+          if (rowEmail === email && cid && !foundExisting) {
+            foundExisting = cid;
+          }
+
+          // Track max sequence for today to determine next ID
+          if (cid.startsWith(OMS_CONFIG.CUSTOMER_ID_PREFIX + todayKey + '-')) {
+            const parts = cid.split('-');
+            const seq = parseInt(parts[parts.length - 1]);
+            if (!isNaN(seq) && seq > maxSeq) maxSeq = seq;
+          }
         }
+      }
 
-        // 2. Track maximum sequence for TODAY's key to determine next available
+      if (foundExisting) {
+        this._cidCache[email] = foundExisting;
+        return foundExisting;
+      }
+
+      // 4. Also check a reservation in PropertiesService to cover the gap between
+      // allocation and the final sheet write by other concurrent executions.
+      const props = PropertiesService.getScriptProperties();
+      const propKey = 'LAST_CID_SEQ_' + todayKey;
+      const reservedSeq = parseInt(props.getProperty(propKey) || '0');
+      if (reservedSeq > maxSeq) maxSeq = reservedSeq;
+
+      // 5. Account for IDs assigned in THIS execution but not yet written to the sheet
+      Object.values(this._cidCache).forEach(cid => {
         if (cid.startsWith(OMS_CONFIG.CUSTOMER_ID_PREFIX + todayKey + '-')) {
           const parts = cid.split('-');
           const seq = parseInt(parts[parts.length - 1]);
           if (!isNaN(seq) && seq > maxSeq) maxSeq = seq;
         }
-      }
+      });
+
+      const n = maxSeq + 1;
+      const newCid = `${OMS_CONFIG.CUSTOMER_ID_PREFIX}${todayKey}-${String(n).padStart(3, '0')}`;
+
+      // Update reservation in PropertiesService
+      props.setProperty(propKey, String(n));
+
+      this._cidCache[email] = newCid;
+      return newCid;
+
+    } catch (err) {
+      throw new Error(`Customer ID allocation failed: ${err.message}`);
+    } finally {
+      lock.releaseLock();
     }
-
-    if (foundExisting) {
-      this._cidCache[email] = foundExisting;
-      return foundExisting;
-    }
-
-    // 3. Also account for IDs assigned in this execution but not yet written to the sheet
-    Object.values(this._cidCache).forEach(cid => {
-      if (cid.startsWith(OMS_CONFIG.CUSTOMER_ID_PREFIX + todayKey + '-')) {
-        const parts = cid.split('-');
-        const seq = parseInt(parts[parts.length - 1]);
-        if (!isNaN(seq) && seq > maxSeq) maxSeq = seq;
-      }
-    });
-
-    const n = maxSeq + 1;
-    const newCid = `${OMS_CONFIG.CUSTOMER_ID_PREFIX}${todayKey}-${String(n).padStart(3, '0')}`;
-    this._cidCache[email] = newCid;
-    return newCid;
   },
 
   /********************************
@@ -239,8 +270,15 @@ var OMS_Utils = {
    * Slack + Gmail
    ********************************/
   slack_(text) {
-    if (!OMS_CONFIG.SLACK.ENABLED || !OMS_CONFIG.SLACK.WEBHOOK_URL) return;
-    UrlFetchApp.fetch(OMS_CONFIG.SLACK.WEBHOOK_URL, {
+    if (!OMS_CONFIG.SLACK.ENABLED) return;
+
+    const url = OMS_CONFIG.SLACK.WEBHOOK_URL;
+    if (!url || !/^https:\/\/hooks\.slack\.com\/services\//.test(url)) {
+      console.warn('Slack notifications are enabled but WEBHOOK_URL is missing or invalid.');
+      return;
+    }
+
+    UrlFetchApp.fetch(url, {
       method: 'post',
       contentType: 'application/json',
       payload: JSON.stringify({ text }),
@@ -256,7 +294,13 @@ var OMS_Utils = {
    * Send a rich Slack notification for a new order using Blocks
    */
   sendSlackOrderNotification(order) {
-    if (!OMS_CONFIG.SLACK.ENABLED || !OMS_CONFIG.SLACK.WEBHOOK_URL) return;
+    if (!OMS_CONFIG.SLACK.ENABLED) return;
+
+    const url = OMS_CONFIG.SLACK.WEBHOOK_URL;
+    if (!url || !/^https:\/\/hooks\.slack\.com\/services\//.test(url)) {
+      console.warn('Slack notifications are enabled but WEBHOOK_URL is missing or invalid.');
+      return;
+    }
 
     const blocks = [
       {
@@ -266,17 +310,26 @@ var OMS_Utils = {
       {
         type: "section",
         fields: [
-          { type: "mrkdwn", text: `*Customer:*\n${order.buyerName}` },
-          { type: "mrkdwn", text: `*Customer ID:*\n${order.customerId}` },
-          { type: "mrkdwn", text: `*Email:*\n${order.buyerEmail}` },
+          { type: "mrkdwn", text: `*Customer:*\n${order.buyerName || 'N/A'}` },
+          { type: "mrkdwn", text: `*Customer ID:*\n${order.customerId || 'N/A'}` },
+          { type: "mrkdwn", text: `*Email:*\n${order.buyerEmail || 'N/A'}` },
           { type: "mrkdwn", text: `*Phone:*\n${order.buyerPhone || 'N/A'}` }
+        ]
+      },
+      {
+        type: "section",
+        fields: [
+          { type: "mrkdwn", text: `*Purchase Date:*\n${order.purchaseDate || 'N/A'}` },
+          { type: "mrkdwn", text: `*Purchase Time:*\n${order.purchaseTime || 'N/A'}` },
+          { type: "mrkdwn", text: `*Recipient Name:*\n${order.recipientName || order.buyerName || 'N/A'}` },
+          { type: "mrkdwn", text: `*Coupon Code:*\n${order.couponCode || 'None'}` }
         ]
       },
       {
         type: "section",
         text: {
           type: "mrkdwn",
-          text: `*Shipping Address:*\n${order.shipAddr1}, ${order.shipCity}, ${order.shipState} ${order.shipPostal}, ${order.shipCountry}`
+          text: `*Shipping Address:*\n${order.shipAddr1 || 'N/A'}, ${order.shipCity || 'N/A'}, ${order.shipState || ''} ${order.shipPostal || ''}, ${order.shipCountry || 'N/A'}`
         }
       },
       { type: "divider" }
@@ -297,7 +350,7 @@ var OMS_Utils = {
         type: "section",
         text: {
           type: "mrkdwn",
-          text: `*Item ${idx + 1}:* ${it.productName}\n*SKU:* \`${it.sku}\` | *Qty:* ${it.quantity} | *Price:* $${it.price}` +
+          text: `*Item ${idx + 1}:* ${it.productName || 'N/A'}\n*SKU:* \`${it.sku}\` | *Qty:* ${it.quantity} | *Price:* $${it.price}` +
                 (specs.length ? `\n${specs.join(' | ')}` : '')
         }
       });
@@ -308,16 +361,24 @@ var OMS_Utils = {
       type: "section",
       fields: [
         { type: "mrkdwn", text: `*Sales Channel:*\n${order.salesChannel || 'SamCart'}` },
-        { type: "mrkdwn", text: `*Total Amount:*\n$${order.totalAmount}` }
+        { type: "mrkdwn", text: `*Subtotal:* $${order.subtotal || 0}` },
+        { type: "mrkdwn", text: `*Shipping:* $${order.shipping || 0}` },
+        { type: "mrkdwn", text: `*Tax:* $${order.tax || 0}` },
+        { type: "mrkdwn", text: `*Discount:* $${order.discount || 0}` },
+        { type: "mrkdwn", text: `*Total Amount:* $${order.totalAmount}` }
       ]
     });
 
-    UrlFetchApp.fetch(OMS_CONFIG.SLACK.WEBHOOK_URL, {
-      method: 'post',
-      contentType: 'application/json',
-      payload: JSON.stringify({ blocks }),
-      muteHttpExceptions: true,
-    });
+    try {
+      UrlFetchApp.fetch(OMS_CONFIG.SLACK.WEBHOOK_URL, {
+        method: 'post',
+        contentType: 'application/json',
+        payload: JSON.stringify({ blocks }),
+        muteHttpExceptions: true,
+      });
+    } catch (e) {
+      console.error(`Failed to send Slack notification: ${e.message}`);
+    }
   },
 
   getOrCreateLabel_(name) {

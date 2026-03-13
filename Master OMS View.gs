@@ -1,119 +1,167 @@
-/*******************************
- * Master OMS View (place anywhere)
- *******************************/
+/********************************
+ * Master OMS View.gs
+ ********************************/
 
-function refreshMasterOmsView() {
+function refreshMasterOmsView(optStart, optEnd) {
   const ss = OMS_Utils.ss();
-  const inbound = OMS_Utils.sheet_(OMS_CONFIG.TABS.INBOUND);
-  const outbound = OMS_Utils.sheet_(OMS_CONFIG.TABS.OUTBOUND);
 
-  let master = ss.getSheetByName(OMS_CONFIG.TABS.MASTER);
-  if (!master) master = ss.insertSheet(OMS_CONFIG.TABS.MASTER);
-  master.clearContents();
+  let startDate = optStart || null;
+  let endDate = optEnd || null;
 
-  const inCols = OMS_Utils.getHeadersMap_(inbound);
-  const outCols = OMS_Utils.getHeadersMap_(outbound);
+  // 1. Prompt for date range if not provided
+  if (!startDate) {
+    const ui = SpreadsheetApp.getUi();
+    const response = ui.prompt('Refresh Master View', 'Enter date range (e.g. 2024-01-01 to 2024-01-31) or leave blank for all:', ui.ButtonSet.OK_CANCEL);
+    if (response.getSelectedButton() !== ui.Button.OK) return;
 
-  const inData = inbound.getLastRow() >= 2
-    ? inbound.getRange(1, 1, inbound.getLastRow(), inbound.getLastColumn()).getValues()
-    : [];
-  const outData = outbound.getLastRow() >= 2
-    ? outbound.getRange(1, 1, outbound.getLastRow(), outbound.getLastColumn()).getValues()
-    : [];
+    const input = response.getResponseText().trim();
+    if (input) {
+      const parts = input.split(/\s+to\s+|\s+-\s+|,/i);
+      startDate = new Date(parts[0].trim());
+      if (parts.length > 1) {
+        endDate = new Date(parts[1].trim());
+      } else {
+        endDate = new Date(startDate); // Single day
+      }
 
-  const headers = [
-    'merchant-order-id','sku','customer-id','buyer-email','full-name',
-    'mag-safe-stand','flex','hand','quantity','order-value-usd','order-date',
-    'serial-number-allocated','serial-number-scanned','sn-verify',
-    'domestic-tracking-kr','hub-received-date','international-tracking-us','carrier-us','status-email','last-email-at',
-    'inbound-parse-status','inbound-notes','outbound-status','outbound-notes',
-  ];
-  master.getRange(1, 1, 1, headers.length).setValues([headers]).setFontWeight('bold');
-  master.setFrozenRows(1);
-
-  if (!inData.length) return;
-
-  // Build outbound map by (orderId|sku)
-  const outMap = new Map();
-  if (outData.length >= 2) {
-    const oh = outData[0].map(h => String(h || '').toLowerCase().trim());
-    const idx = {};
-    oh.forEach((h, i) => idx[h] = i);
-
-    for (let r = 1; r < outData.length; r++) {
-      const row = outData[r];
-      const oid = String(row[idx['merchant-order-id']] || '').trim();
-      const sku = String(row[idx['sku']] || '').trim();
-      if (!oid || !sku) continue;
-      outMap.set(`${oid}|${sku}`, row);
+      if (isNaN(startDate.getTime()) || (endDate && isNaN(endDate.getTime()))) {
+        ui.alert('Invalid date format. Please use YYYY-MM-DD to YYYY-MM-DD or YYYY-MM-DD. Aborting refresh.');
+        return;
+      }
     }
   }
 
-  // Inbound rows → join outbound
-  const ih = inData[0].map(h => String(h || '').toLowerCase().trim());
-  const iidx = {};
-  ih.forEach((h, i) => iidx[h] = i);
+  // Normalize boundaries to start/end of day
+  if (startDate instanceof Date && !isNaN(startDate.getTime())) startDate.setHours(0,0,0,0);
+  if (endDate instanceof Date && !isNaN(endDate.getTime())) endDate.setHours(23,59,59,999);
 
-  const outHeadersLower = outData.length ? outData[0].map(h => String(h || '').toLowerCase().trim()) : [];
-  const oidx = {};
-  outHeadersLower.forEach((h, i) => oidx[h] = i);
+  const inbound = OMS_Utils.sheet_(OMS_CONFIG.TABS.INBOUND);
+  const outbound = OMS_Utils.sheet_(OMS_CONFIG.TABS.OUTBOUND);
+  const masterView = OMS_Utils.sheet_(OMS_CONFIG.TABS.MASTER_VIEW);
 
+  const inCols = OMS_Utils.requireCols_(inbound, [
+    'oms-order-item-id','oms-order-id','source-system','source-order-id','source-order-item-id',
+    'merchant-order-id','merchant-order-item-id','sku','customer-id','buyer-email-hash','buyer-email','buyer-name',
+    'purchase-date','sales-channel','item-life-cycle','order-life-cycle','replacement-type','replacement-group-id',
+    'quantity-purchased','currency','item-price','item-tax','shipping-price','total-amount','refund-amount','refund-date',
+    'serial-number-allocated','notes'
+  ]);
+
+  const outCols = OMS_Utils.requireCols_(outbound, [
+    'oms-order-item-id','domestic-tracking-kr','hub-received-date','international-tracking-us','carrier-us',
+    'outbound-status','serial-number-scanned','sn-verify','customer-email-status','last-email-at','shipment-id',
+    'us-ship-date','delivered-date'
+  ]);
+
+  // Build outbound map by oms-order-item-id
+  const outMap = new Map();
+  const outLR = outbound.getLastRow();
+  if (outLR >= 2) {
+    const outData = outbound.getRange(2, 1, outLR - 1, outbound.getLastColumn()).getValues();
+    outData.forEach(row => {
+      const key = String(row[outCols['oms-order-item-id'] - 1] || '').trim();
+      if (!key) return;
+      outMap.set(key, row);
+    });
+  }
+
+  const headers = OMS_SCHEMA_MASTER_VIEW_();
+
+  masterView.clear();
+  masterView.getRange(1,1,1,headers.length).setValues([headers]);
+
+  // Style header
+  masterView.getRange(1, 1, 1, headers.length)
+    .setFontWeight('bold')
+    .setBackground('#111827')
+    .setFontColor('#FFFFFF')
+    .setWrap(true)
+    .setVerticalAlignment('middle');
+
+  masterView.setRowHeight(1, 36);
+  masterView.setFrozenRows(1);
+
+  // Safely create filter
+  const existingFilter = masterView.getFilter();
+  if (existingFilter) existingFilter.remove();
+  masterView.getRange(1, 1, 1, headers.length).createFilter();
+
+  const inLR = inbound.getLastRow();
+  if (inLR < 2) return;
+
+  const inData = inbound.getRange(2, 1, inLR - 1, inbound.getLastColumn()).getValues();
   const outRows = [];
-  for (let r = 1; r < inData.length; r++) {
-    const row = inData[r];
-    const oid = String(row[iidx['merchant-order-id']] || '').trim();
-    const sku = String(row[iidx['sku']] || '').trim();
-    if (!oid || !sku) continue;
 
-    const joined = outMap.get(`${oid}|${sku}`);
+  inData.forEach(inRow => {
+    const omsItem = String(inRow[inCols['oms-order-item-id'] - 1] || '').trim();
+    if (!omsItem) return;
 
-    const serialAllocated = String(row[iidx['serial-number-allocated']] || '').trim();
-    const serialScanned = joined ? String(joined[oidx['serial-number-scanned']] || '').trim() : '';
-    const snVerify = joined ? String(joined[oidx['sn-verify']] || '').trim() : (serialAllocated && serialScanned ? (serialAllocated === serialScanned ? 'OK' : 'MISMATCH') : '');
+    // Filter by date if range provided
+    const pDateVal = inRow[inCols['purchase-date'] - 1];
+    if (startDate && endDate && pDateVal) {
+      const pDate = (pDateVal instanceof Date) ? pDateVal : new Date(pDateVal);
+      if (isNaN(pDate.getTime()) || pDate < startDate || pDate > endDate) return;
+    }
+
+    const o = outMap.get(omsItem);
+    const serialScanned = o ? String(o[outCols['serial-number-scanned'] - 1] || '').trim() : '';
+    const snVerify = o ? String(o[outCols['sn-verify'] - 1] || '').trim() : '';
+
+    const toDate_ = (val) => {
+      if (!val) return '';
+      if (val instanceof Date) return val;
+      const d = new Date(val);
+      return isNaN(d.getTime()) ? val : d;
+    };
 
     outRows.push([
-      oid,
-      sku,
-      row[iidx['customer-id']] || '',
-      row[iidx['buyer-email']] || '',
-      row[iidx['full-name']] || '',
-      row[iidx['mag-safe-stand']] || '',
-      row[iidx['flex']] || '',
-      row[iidx['hand']] || '',
-      row[iidx['quantity']] || '',
-      row[iidx['order-value-usd']] || '',
-      row[iidx['order-date']] || '',
-      serialAllocated,
+      inRow[inCols['oms-order-id'] - 1],
+      omsItem,
+      inRow[inCols['source-system'] - 1],
+      inRow[inCols['source-order-id'] - 1],
+      inRow[inCols['source-order-item-id'] - 1],
+      inRow[inCols['merchant-order-id'] - 1],
+      inRow[inCols['merchant-order-item-id'] - 1],
+      inRow[inCols['sku'] - 1],
+      inRow[inCols['customer-id'] - 1],
+      inRow[inCols['buyer-email-hash'] - 1],
+      inRow[inCols['buyer-email'] - 1],
+      inRow[inCols['buyer-name'] - 1],
+      toDate_(inRow[inCols['purchase-date'] - 1]),
+      inRow[inCols['sales-channel'] - 1],
+      inRow[inCols['item-life-cycle'] - 1],
+      inRow[inCols['order-life-cycle'] - 1],
+      inRow[inCols['replacement-type'] - 1],
+      inRow[inCols['replacement-group-id'] - 1],
+      inRow[inCols['quantity-purchased'] - 1],
+      inRow[inCols['currency'] - 1],
+      inRow[inCols['item-price'] - 1],
+      inRow[inCols['item-tax'] - 1],
+      inRow[inCols['shipping-price'] - 1],
+      inRow[inCols['total-amount'] - 1],
+      inRow[inCols['refund-amount'] - 1],
+      toDate_(inRow[inCols['refund-date'] - 1]),
+      inRow[inCols['serial-number-allocated'] - 1],
+
       serialScanned,
       snVerify,
-      joined ? joined[oidx['domestic-tracking-kr']] || '' : '',
-      joined ? joined[oidx['hub-received-date']] || '' : '',
-      joined ? joined[oidx['international-tracking-us']] || '' : '',
-      joined ? joined[oidx['carrier-us']] || '' : '',
-      joined ? joined[oidx['status-email']] || '' : '',
-      joined ? joined[oidx['last-email-at']] || '' : '',
-      row[iidx['parse-status']] || '',
-      row[iidx['notes']] || '',
-      joined ? joined[oidx['outbound-status']] || '' : '',
-      joined ? joined[oidx['notes']] || '' : '',
+
+      o ? o[outCols['domestic-tracking-kr'] - 1] : '',
+      o ? toDate_(o[outCols['hub-received-date'] - 1]) : '',
+      o ? o[outCols['international-tracking-us'] - 1] : '',
+      o ? o[outCols['carrier-us'] - 1] : '',
+      o ? toDate_(o[outCols['us-ship-date'] - 1]) : '',
+      o ? toDate_(o[outCols['delivered-date'] - 1]) : '',
+      o ? o[outCols['outbound-status'] - 1] : '',
+      o ? o[outCols['customer-email-status'] - 1] : '',
+      o ? o[outCols['last-email-at'] - 1] : '',
+      o ? o[outCols['shipment-id'] - 1] : '',
+
+      inRow[inCols['notes'] - 1],
     ]);
-  }
+  });
 
   if (outRows.length) {
-    master.getRange(2, 1, outRows.length, headers.length).setValues(outRows);
-  }
-
-  // Optional visual flagging for mismatches
-  const snVerifyCol = headers.indexOf('sn-verify') + 1;
-  if (outRows.length) {
-    const rng = master.getRange(2, snVerifyCol, outRows.length, 1);
-    const vals = rng.getValues();
-    const bgs = vals.map(v => {
-      const s = String(v[0] || '').toUpperCase();
-      if (s === 'MISMATCH' || s.startsWith('ERROR')) return ['#f4cccc'];
-      if (s === 'OK') return ['#d9ead3'];
-      return [null];
-    });
-    rng.setBackgrounds(bgs);
+    masterView.getRange(2, 1, outRows.length, headers.length).setValues(outRows);
   }
 }

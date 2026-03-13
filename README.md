@@ -358,6 +358,10 @@ The OMS separates responsibilities into three layers:
 
 This structure ensures clean sales data, reliable shipment tracking, and clear operational visibility.
 
+## Appendix: Implementation Notes
+
+The system originally used `Master_OMS_Table` as its canonical view. This has been unified into `Master_OMS_View` to align with operational documentation. The primary refresh logic is handled by `refreshMasterOmsView()` in `Master OMS View.gs`.
+
 # Automation Process & Workflow Report
 
 The G·GRIP OMS is designed for "zero-touch" order ingestion and highly automated logistics tracking. Below is the technical and operational report of the full automation workflow.
@@ -396,7 +400,7 @@ The system monitors specific Gmail labels for three primary sales channels: **Sa
   - Hub backlogs or shipping exceptions.
 
 ## 6. Real-Time Analytics & Dashboard
-- **Master Table Join:** The `Master_OMS_Table` automatically joins Inbound (Sales) and Outbound (Logistics) data using the `oms-order-item-id` as the primary key.
+- **Master View Join:** The `Master_OMS_View` automatically joins Inbound (Sales) and Outbound (Logistics) data using the `oms-order-item-id` as the primary key.
 - **Dynamic Metrics:** The `Master_OMS_Dashboard` uses dynamic formulas to calculate:
   - **Logistics Velocity:** Average days for each shipping leg (Purchase → Hub → US → Door).
   - **Operational Health:** Hub backlog counts, S/N mismatch rates, and reshipment percentages.

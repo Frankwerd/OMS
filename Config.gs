@@ -35,7 +35,7 @@ const OMS_CONFIG = {
     INBOUND: 'Inbound_Orders',
     OUTBOUND: 'Outbound_Logistics',
     DASHBOARD: 'Master_OMS_Dashboard',
-    MASTER_TABLE: 'Master_OMS_Table',
+    MASTER_VIEW: 'Master_OMS_View',
     META: '_Meta',
     DASHBOARD_DATA: '_Dashboard_Data',
   },
