@@ -642,7 +642,7 @@ function buildDashboard_(sheet) {
 
   let r = 6;
 
-  // Period Metrics (from Master Table for consistency)
+  // Period Metrics (from Master View for consistency)
   const mstPD = mstCol('purchase-date');
   const dateFilter = `${mstPD},">="&$B$3,${mstPD},"<="&$D$3`;
 
@@ -652,7 +652,7 @@ function buildDashboard_(sheet) {
 
   r++;
 
-  // Logistics Velocity (Calculated using Master Table joins)
+  // Logistics Velocity (Calculated using Master View joins)
   const mstHD = mstCol('hub-received-date');
   const mstUSD = mstCol('us-ship-date');
   const mstDD = mstCol('delivered-date');

@@ -136,7 +136,15 @@ var OMS_Utils = {
 
   /********************************
    * Customer ID: CYYYYMMDD-###
-   * Redesigned to scan sheet for max sequence with LockService for concurrency.
+   * Concurrency-safe allocation using LockService and PropertiesService.
+   *
+   * MAINTENANCE NOTES:
+   * 1. The Inbound_Orders sheet is the ultimate source of truth for Customer IDs.
+   * 2. PropertiesService ('LAST_CID_SEQ_YYYYMMDD') acts as a high-speed reservation
+   *    layer to prevent collisions between the time an ID is allocated and when it
+   *    is finally written to the sheet.
+   * 3. Deleting property keys is safe; the system will simply fall back to
+   *    scanning the sheet (though concurrency risk increases briefly).
    ********************************/
   lookupOrCreateCustomerId_(buyerEmail) {
     const email = this.normalizeEmail_(buyerEmail);
@@ -263,12 +271,14 @@ var OMS_Utils = {
    ********************************/
   slack_(text) {
     if (!OMS_CONFIG.SLACK.ENABLED) return;
-    if (!OMS_CONFIG.SLACK.WEBHOOK_URL) {
-      console.warn('Slack notifications are enabled but WEBHOOK_URL is missing.');
+
+    const url = OMS_CONFIG.SLACK.WEBHOOK_URL;
+    if (!url || !/^https:\/\/hooks\.slack\.com\/services\//.test(url)) {
+      console.warn('Slack notifications are enabled but WEBHOOK_URL is missing or invalid.');
       return;
     }
 
-    UrlFetchApp.fetch(OMS_CONFIG.SLACK.WEBHOOK_URL, {
+    UrlFetchApp.fetch(url, {
       method: 'post',
       contentType: 'application/json',
       payload: JSON.stringify({ text }),
@@ -285,8 +295,10 @@ var OMS_Utils = {
    */
   sendSlackOrderNotification(order) {
     if (!OMS_CONFIG.SLACK.ENABLED) return;
-    if (!OMS_CONFIG.SLACK.WEBHOOK_URL) {
-      console.warn('Slack notifications are enabled but WEBHOOK_URL is missing.');
+
+    const url = OMS_CONFIG.SLACK.WEBHOOK_URL;
+    if (!url || !/^https:\/\/hooks\.slack\.com\/services\//.test(url)) {
+      console.warn('Slack notifications are enabled but WEBHOOK_URL is missing or invalid.');
       return;
     }
 
