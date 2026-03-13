@@ -11,16 +11,25 @@ const OMS_CONFIG = {
     INBOUND: 'Inbound_Orders',
     OUTBOUND: 'Outbound_Logistics',
     MASTER: 'Master_OMS_View',
+    META: '_Meta',
   },
 
   CUSTOMER_ID_PREFIX: 'C',
   RESHIP_SUFFIX: '-RES',
 
-  // Gmail labels (SamCart only for now)
+  // Gmail labels
   GMAIL: {
     SAMCART_TO_PROCESS: 'OMS/Inbound/SamCart/To Process',
     SAMCART_PROCESSED: 'OMS/Inbound/SamCart/Processed',
     SAMCART_ERROR: 'OMS/Inbound/SamCart/Error',
+
+    SHOPIFY_TO_PROCESS: 'OMS/Inbound/Shopify/To Process',
+    SHOPIFY_PROCESSED: 'OMS/Inbound/Shopify/Processed',
+    SHOPIFY_ERROR: 'OMS/Inbound/Shopify/Error',
+
+    IMWEB_TO_PROCESS: 'OMS/Inbound/Imweb/To Process',
+    IMWEB_PROCESSED: 'OMS/Inbound/Imweb/Processed',
+    IMWEB_ERROR: 'OMS/Inbound/Imweb/Error',
   },
 
   SLACK: {
@@ -39,6 +48,8 @@ const OMS_CONFIG = {
   // Canonical IDs
   SOURCE_SYSTEMS: {
     SAMCART: 'samcart',
+    SHOPIFY: 'shopify',
+    IMWEB: 'imweb',
   },
 
   // Provider URLs (rich links)

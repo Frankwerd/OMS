@@ -172,6 +172,23 @@ var OMS_Utils = {
     return `line-${String(Number(n || 1)).padStart(3, '0')}`;
   },
 
+  /**
+   * Derive SKU from product specs
+   * Logic: GG-{Model}-{ClubType}-{Hand}{Flex}-{Length}-{Grip}-{MagSafe}
+   */
+  deriveSku(specs) {
+    const p = specs || {};
+    const model = (String(p.model || '').toUpperCase().includes('PRO')) ? 'PRO' : 'BAS';
+    const club = (String(p.clubType || '').toUpperCase().includes('WOOD')) ? 'WD' : 'IR';
+    const hand = (String(p.hand || '').toUpperCase().startsWith('L')) ? 'L' : 'R';
+    const flex = (String(p.flex || '').toUpperCase()) || 'R';
+    const length = (String(p.length || '').toUpperCase().includes('LONG')) ? 'LG' : 'ST';
+    const grip = (String(p.gripSize || '').toUpperCase().includes('MID')) ? 'MS' : 'ST';
+    const mag = (String(p.magSafeStand || '') === 'Yes' || String(p.magSafeStand || '') === '1') ? 'M' : '0';
+
+    return `GG-${model}-${club}-${hand}${flex}-${length}-${grip}-${mag}`;
+  },
+
   /********************************
    * Slack + Gmail
    ********************************/
@@ -226,7 +243,8 @@ var OMS_Utils = {
   },
 
   /********************************
-   * Address Parsing (Robust)
+   * Address Parsing (Robust Legacy)
+   * Supports US/CA/EU/UK/JP/KR
    ********************************/
   parseGlobalAddress(lines) {
     let d = { addr1: "", city: "", state: "", zip: "", country: "United States" };
@@ -235,22 +253,103 @@ var OMS_Utils = {
     let working = lines.map(l => String(l || '').trim()).filter(Boolean);
     if (!working.length) return d;
 
-    // Last line = geo
-    const geo = working.pop();
+    // 1. Identify country from last line
+    const lastLine = working[working.length - 1].toUpperCase();
+    const countryMap = {
+      'UNITED STATES': 'United States',
+      'CANADA': 'Canada',
+      'UNITED KINGDOM': 'United Kingdom',
+      'UK': 'United Kingdom',
+      'JAPAN': 'Japan',
+      'KOREA': 'South Korea',
+      'SOUTH KOREA': 'South Korea',
+      'REPUBLIC OF KOREA': 'South Korea',
+      'GERMANY': 'Germany',
+      'FRANCE': 'France',
+      'ITALY': 'Italy',
+      'SPAIN': 'Spain',
+      'AUSTRALIA': 'Australia'
+    };
 
-    const usMatch = geo.match(/^(.*?),?\s*([A-Z]{2})\s*(\d{5}(?:-\d{4})?)$/);
-    if (usMatch) {
-      d.city = usMatch[1].trim();
-      d.state = usMatch[2].trim();
-      d.zip = usMatch[3].trim();
-    } else {
-      d.city = geo;
+    let countryDetected = false;
+    for (let key in countryMap) {
+      if (lastLine === key || lastLine.endsWith(' ' + key)) {
+        d.country = countryMap[key];
+        working.pop();
+        countryDetected = true;
+        break;
+      }
     }
 
+    if (!working.length) {
+      d.addr1 = lines.join(', ');
+      return d;
+    }
+
+    // 2. Parse Geo (now last line)
+    const geo = working.pop();
+
+    // US/Canada Pattern: "City, State Zip" or "City State Zip"
+    const usCaMatch = geo.match(/^(.*?)[,\s]+([A-Z]{2})\s+([A-Z0-9\s\-]{3,10})$/i);
+    if (usCaMatch) {
+      d.city = usCaMatch[1].trim();
+      d.state = usCaMatch[2].trim().toUpperCase();
+      d.zip = usCaMatch[3].trim().toUpperCase();
+    }
+    // UK Pattern: "City Postcode"
+    else if (d.country === 'United Kingdom') {
+      const ukMatch = geo.match(/^(.*?)\s+([A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2})$/i);
+      if (ukMatch) {
+        d.city = ukMatch[1].trim();
+        d.zip = ukMatch[2].trim().toUpperCase();
+      } else {
+        d.city = geo;
+      }
+    }
+    // JP/KR Pattern: "Zip City State" or "Zip State City"
+    else if (d.country === 'Japan' || d.country === 'South Korea') {
+      const eastMatch = geo.match(/^\[?(\d{3,7}[-\s]?\d{0,4})\]?\s*(.*)$/);
+      if (eastMatch) {
+        d.zip = eastMatch[1].trim();
+        d.city = eastMatch[2].trim();
+      } else {
+        d.city = geo;
+      }
+    }
+    // EU Pattern: "Zip City"
+    else {
+      const euMatch = geo.match(/^(\d{3,7})\s+(.*)$/) || geo.match(/^(.*?)\s+(\d{3,7})$/);
+      if (euMatch) {
+        if (isNaN(parseInt(euMatch[1].charAt(0)))) { // Zip at end
+          d.city = euMatch[1].trim();
+          d.zip = euMatch[2].trim();
+        } else { // Zip at start
+          d.zip = euMatch[1].trim();
+          d.city = euMatch[2].trim();
+        }
+      } else {
+        d.city = geo;
+      }
+    }
+
+    // 3. Addr1 is whatever is left
     if (working.length) {
       d.addr1 = working.join(', ');
+    } else if (!d.addr1) {
+      // Fallback if we have nothing left, use original lines
+      d.addr1 = lines.join(', ');
     }
 
     return d;
+  },
+
+  normalizeDateYYYYMMDD(dateStr) {
+    const s = String(dateStr || '').replace(/(st|nd|rd|th)/g, '').replace(/,/g, '').trim();
+    const d = new Date(s);
+    if (isNaN(d.getTime())) return '';
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
   },
 };
