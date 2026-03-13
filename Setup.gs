@@ -61,7 +61,7 @@ function omsRefreshDashboard() {
   let endDate = dashboard.getRange('D3').getValue();
 
   if (input) {
-    const parts = input.split(/ to | - |,/i);
+    const parts = input.split(/\s+to\s+|\s+-\s+|,/i);
     startDate = new Date(parts[0].trim());
     if (parts.length > 1) {
       endDate = new Date(parts[1].trim());
@@ -73,9 +73,8 @@ function omsRefreshDashboard() {
       dashboard.getRange('B3').setValue(startDate);
       dashboard.getRange('D3').setValue(endDate);
     } else {
-      ui.alert('Invalid date format. Proceeding with current dates.');
-      startDate = dashboard.getRange('B3').getValue();
-      endDate = dashboard.getRange('D3').getValue();
+      ui.alert('Invalid date format. Please use YYYY-MM-DD to YYYY-MM-DD or YYYY-MM-DD. Aborting refresh.');
+      return;
     }
   }
 

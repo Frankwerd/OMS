@@ -16,7 +16,7 @@ function refreshMasterOmsTable(optStart, optEnd) {
 
     const input = response.getResponseText().trim();
     if (input) {
-      const parts = input.split(/ to | - |,/i);
+      const parts = input.split(/\s+to\s+|\s+-\s+|,/i);
       startDate = new Date(parts[0].trim());
       if (parts.length > 1) {
         endDate = new Date(parts[1].trim());
@@ -25,8 +25,8 @@ function refreshMasterOmsTable(optStart, optEnd) {
       }
 
       if (isNaN(startDate.getTime()) || (endDate && isNaN(endDate.getTime()))) {
-        ui.alert('Invalid date format. Proceeding with all records.');
-        startDate = null; endDate = null;
+        ui.alert('Invalid date format. Please use YYYY-MM-DD to YYYY-MM-DD or YYYY-MM-DD. Aborting refresh.');
+        return;
       }
     }
   }
