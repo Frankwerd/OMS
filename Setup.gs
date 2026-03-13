@@ -51,6 +51,30 @@ function omsRefreshDashboard() {
   const ss = OMS_Utils.ss();
   const dashboard = ss.getSheetByName(OMS_CONFIG.TABS.DASHBOARD);
   if (!dashboard) throw new Error('Dashboard sheet not found. Run omsSetupSheet() first.');
+
+  const ui = SpreadsheetApp.getUi();
+  const response = ui.prompt('Refresh Dashboard', 'Enter date range (e.g. 2024-01-01 to 2024-01-31) or leave blank to keep current:', ui.ButtonSet.OK_CANCEL);
+  if (response.getSelectedButton() !== ui.Button.OK) return;
+
+  const input = response.getResponseText().trim();
+  if (input) {
+    let startDate = null, endDate = null;
+    const parts = input.split(/ to | - |,/i);
+    startDate = new Date(parts[0].trim());
+    if (parts.length > 1) {
+      endDate = new Date(parts[1].trim());
+    } else {
+      endDate = new Date(startDate);
+    }
+
+    if (!isNaN(startDate.getTime()) && !isNaN(endDate.getTime())) {
+      dashboard.getRange('B3').setValue(startDate);
+      dashboard.getRange('D3').setValue(endDate);
+    } else {
+      ui.alert('Invalid date format. Proceeding with current dates.');
+    }
+  }
+
   buildDashboard_(dashboard);
   SpreadsheetApp.flush();
 }
@@ -549,6 +573,7 @@ function styleOutbound_(sheet) {
 /** ---------------- DASHBOARD (MERGE SAFE) ---------------- **/
 
 function buildDashboard_(sheet) {
+  const ss = OMS_Utils.ss();
   // ✅ FIX: remove any existing filter before merges
   const f = sheet.getFilter();
   if (f) f.remove();

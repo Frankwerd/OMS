@@ -284,11 +284,21 @@ var OMS_Utils = {
 
     // Add items
     order.items.forEach((it, idx) => {
+      let specs = [];
+      if (it.model) specs.push(`*Model:* ${it.model}`);
+      if (it.clubType) specs.push(`*Club:* ${it.clubType}`);
+      if (it.hand) specs.push(`*Hand:* ${it.hand}`);
+      if (it.flex) specs.push(`*Flex:* ${it.flex}`);
+      if (it.length || it.shaftLengthOption) specs.push(`*Length:* ${it.length || it.shaftLengthOption}`);
+      if (it.gripSize) specs.push(`*Grip:* ${it.gripSize}`);
+      if (it.magSafeStand) specs.push(`*Stand:* ${it.magSafeStand}`);
+
       blocks.push({
         type: "section",
         text: {
           type: "mrkdwn",
-          text: `*Item ${idx + 1}:* ${it.productName}\n*SKU:* \`${it.sku}\` | *Qty:* ${it.quantity} | *Price:* $${it.price}`
+          text: `*Item ${idx + 1}:* ${it.productName}\n*SKU:* \`${it.sku}\` | *Qty:* ${it.quantity} | *Price:* $${it.price}` +
+                (specs.length ? `\n${specs.join(' | ')}` : '')
         }
       });
     });
