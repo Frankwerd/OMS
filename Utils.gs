@@ -42,7 +42,9 @@ var OMS_Utils = {
    * Header Utilities
    ********************************/
   getHeadersMap_(sheet) {
-    const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn())
+    const lc = sheet.getLastColumn();
+    if (lc === 0) return {};
+    const headers = sheet.getRange(1, 1, 1, lc)
       .getValues()[0]
       .map(h => String(h || '').trim().toLowerCase());
 
@@ -108,6 +110,16 @@ var OMS_Utils = {
     return String(email || '').trim().toLowerCase();
   },
 
+  normalizePhone(phone) {
+    const cleaned = String(phone || '').replace(/\D/g, '');
+    if (cleaned.length === 10) {
+      return `+1-${cleaned.slice(0, 3)}-${cleaned.slice(3, 6)}-${cleaned.slice(6)}`;
+    } else if (cleaned.length === 11 && cleaned.startsWith('1')) {
+      return `+1-${cleaned.slice(1, 4)}-${cleaned.slice(4, 7)}-${cleaned.slice(7)}`;
+    }
+    return String(phone || '').replace(/[^\d+]/g, '');
+  },
+
   sha256Hex_(text) {
     const bytes = Utilities.computeDigest(
       Utilities.DigestAlgorithm.SHA_256,
@@ -124,34 +136,64 @@ var OMS_Utils = {
 
   /********************************
    * Customer ID: CYYYYMMDD-###
+   * Redesigned to scan sheet for max sequence (no ScriptProperties)
    ********************************/
   lookupOrCreateCustomerId_(buyerEmail) {
     const email = this.normalizeEmail_(buyerEmail);
     if (!email) throw new Error('Missing buyer-email for customer-id.');
 
+    // Local execution cache to handle multiple items/orders for same NEW customer in one batch
+    if (!this._cidCache) this._cidCache = {};
+    if (this._cidCache[email]) return this._cidCache[email];
+
     const inbound = this.sheet_(OMS_CONFIG.TABS.INBOUND);
     const cols = this.requireCols_(inbound, ['buyer-email', 'customer-id']);
-
     const lr = inbound.getLastRow();
+    const todayKey = Utilities.formatDate(new Date(), OMS_CONFIG.TZ, 'yyyyMMdd');
+
+    let maxSeq = 0;
+    let foundExisting = null;
+
     if (lr >= 2) {
       const emails = inbound.getRange(2, cols['buyer-email'], lr - 1, 1).getValues();
       const cids = inbound.getRange(2, cols['customer-id'], lr - 1, 1).getValues();
 
-      for (let i = emails.length - 1; i >= 0; i--) {
-        if (this.normalizeEmail_(emails[i][0]) === email) {
-          const existing = String(cids[i][0] || '').trim();
-          if (existing) return existing;
+      for (let i = 0; i < cids.length; i++) {
+        const rowEmail = this.normalizeEmail_(emails[i][0]);
+        const cid = String(cids[i][0] || '').trim();
+
+        // 1. Check if this email already has an ID in the sheet
+        if (rowEmail === email && cid && !foundExisting) {
+          foundExisting = cid;
+        }
+
+        // 2. Track maximum sequence for TODAY's key to determine next available
+        if (cid.startsWith(OMS_CONFIG.CUSTOMER_ID_PREFIX + todayKey + '-')) {
+          const parts = cid.split('-');
+          const seq = parseInt(parts[parts.length - 1]);
+          if (!isNaN(seq) && seq > maxSeq) maxSeq = seq;
         }
       }
     }
 
-    const todayKey = Utilities.formatDate(new Date(), OMS_CONFIG.TZ, 'yyyyMMdd');
-    const props = PropertiesService.getScriptProperties();
-    const k = `CID_COUNTER_${todayKey}`;
-    const n = Number(props.getProperty(k) || '0') + 1;
-    props.setProperty(k, String(n));
+    if (foundExisting) {
+      this._cidCache[email] = foundExisting;
+      return foundExisting;
+    }
 
-    return `${OMS_CONFIG.CUSTOMER_ID_PREFIX}${todayKey}-${String(n).padStart(3, '0')}`;
+    // 3. Also account for IDs assigned in this execution but not yet written to the sheet
+    Object.values(this._cidCache).forEach(cid => {
+      if (cid.startsWith(OMS_CONFIG.CUSTOMER_ID_PREFIX + todayKey + '-')) {
+        const parts = cid.split('-');
+        const seq = parseInt(parts[parts.length - 1]);
+        if (!isNaN(seq) && seq > maxSeq) maxSeq = seq;
+      }
+    });
+
+    const n = maxSeq + 1;
+    const newCid = `${OMS_CONFIG.CUSTOMER_ID_PREFIX}${todayKey}-${String(n).padStart(3, '0')}`;
+    this._cidCache[email] = newCid;
+    return newCid;
   },
 
   /********************************
@@ -181,10 +223,14 @@ var OMS_Utils = {
     const model = (String(p.model || '').toUpperCase().includes('PRO')) ? 'PRO' : 'BAS';
     const club = (String(p.clubType || '').toUpperCase().includes('WOOD')) ? 'WD' : 'IR';
     const hand = (String(p.hand || '').toUpperCase().startsWith('L')) ? 'L' : 'R';
-    const flex = (String(p.flex || '').toUpperCase()) || 'R';
+
+    // Normalize flex: R, S, L, X (default R)
+    let flex = String(p.flex || '').toUpperCase().charAt(0);
+    if (!['R','S','L','X'].includes(flex)) flex = 'R';
+
     const length = (String(p.length || '').toUpperCase().includes('LONG')) ? 'LG' : 'ST';
     const grip = (String(p.gripSize || '').toUpperCase().includes('MID')) ? 'MS' : 'ST';
-    const mag = (String(p.magSafeStand || '') === 'Yes' || String(p.magSafeStand || '') === '1') ? 'M' : '0';
+    const mag = (String(p.magSafeStand || '') === 'Yes' || String(p.magSafeStand || '') === '1' || String(p.magSafeStand || '').toUpperCase() === 'TRUE') ? 'M' : '0';
 
     return `GG-${model}-${club}-${hand}${flex}-${length}-${grip}-${mag}`;
   },
@@ -204,6 +250,74 @@ var OMS_Utils = {
 
   opsAlert_(text) {
     this.slack_(`🚨 ${OMS_CONFIG.SLACK.OPS_ALERTS_TAG}\n${text}`);
+  },
+
+  /**
+   * Send a rich Slack notification for a new order using Blocks
+   */
+  sendSlackOrderNotification(order) {
+    if (!OMS_CONFIG.SLACK.ENABLED || !OMS_CONFIG.SLACK.WEBHOOK_URL) return;
+
+    const blocks = [
+      {
+        type: "header",
+        text: { type: "plain_text", text: `📦 New Order: ${order.orderId}` }
+      },
+      {
+        type: "section",
+        fields: [
+          { type: "mrkdwn", text: `*Customer:*\n${order.buyerName}` },
+          { type: "mrkdwn", text: `*Customer ID:*\n${order.customerId}` },
+          { type: "mrkdwn", text: `*Email:*\n${order.buyerEmail}` },
+          { type: "mrkdwn", text: `*Phone:*\n${order.buyerPhone || 'N/A'}` }
+        ]
+      },
+      {
+        type: "section",
+        text: {
+          type: "mrkdwn",
+          text: `*Shipping Address:*\n${order.shipAddr1}, ${order.shipCity}, ${order.shipState} ${order.shipPostal}, ${order.shipCountry}`
+        }
+      },
+      { type: "divider" }
+    ];
+
+    // Add items
+    order.items.forEach((it, idx) => {
+      let specs = [];
+      if (it.model) specs.push(`*Model:* ${it.model}`);
+      if (it.clubType) specs.push(`*Club:* ${it.clubType}`);
+      if (it.hand) specs.push(`*Hand:* ${it.hand}`);
+      if (it.flex) specs.push(`*Flex:* ${it.flex}`);
+      if (it.length || it.shaftLengthOption) specs.push(`*Length:* ${it.length || it.shaftLengthOption}`);
+      if (it.gripSize) specs.push(`*Grip:* ${it.gripSize}`);
+      if (it.magSafeStand) specs.push(`*Stand:* ${it.magSafeStand}`);
+
+      blocks.push({
+        type: "section",
+        text: {
+          type: "mrkdwn",
+          text: `*Item ${idx + 1}:* ${it.productName}\n*SKU:* \`${it.sku}\` | *Qty:* ${it.quantity} | *Price:* $${it.price}` +
+                (specs.length ? `\n${specs.join(' | ')}` : '')
+        }
+      });
+    });
+
+    blocks.push({ type: "divider" });
+    blocks.push({
+      type: "section",
+      fields: [
+        { type: "mrkdwn", text: `*Sales Channel:*\n${order.salesChannel || 'SamCart'}` },
+        { type: "mrkdwn", text: `*Total Amount:*\n$${order.totalAmount}` }
+      ]
+    });
+
+    UrlFetchApp.fetch(OMS_CONFIG.SLACK.WEBHOOK_URL, {
+      method: 'post',
+      contentType: 'application/json',
+      payload: JSON.stringify({ blocks }),
+      muteHttpExceptions: true,
+    });
   },
 
   getOrCreateLabel_(name) {
@@ -243,58 +357,80 @@ var OMS_Utils = {
   },
 
   /********************************
-   * Address Parsing (Robust Legacy)
+   * Address Parsing (Robust)
    * Supports US/CA/EU/UK/JP/KR
    ********************************/
   parseGlobalAddress(lines) {
-    let d = { addr1: "", city: "", state: "", zip: "", country: "United States" };
+    let d = { addr1: "", city: "", state: "", zip: "", country: "United States", success: false };
     if (!lines || !lines.length) return d;
 
+    const originalBlock = lines.join(', ');
     let working = lines.map(l => String(l || '').trim()).filter(Boolean);
     if (!working.length) return d;
 
     // 1. Identify country from last line
     const lastLine = working[working.length - 1].toUpperCase();
     const countryMap = {
-      'UNITED STATES': 'United States',
+      'UNITED STATES': 'United States', 'USA': 'United States',
       'CANADA': 'Canada',
-      'UNITED KINGDOM': 'United Kingdom',
-      'UK': 'United Kingdom',
+      'UNITED KINGDOM': 'United Kingdom', 'UK': 'United Kingdom', 'GREAT BRITAIN': 'United Kingdom',
       'JAPAN': 'Japan',
-      'KOREA': 'South Korea',
-      'SOUTH KOREA': 'South Korea',
-      'REPUBLIC OF KOREA': 'South Korea',
-      'GERMANY': 'Germany',
+      'KOREA': 'South Korea', 'SOUTH KOREA': 'South Korea', 'REPUBLIC OF KOREA': 'South Korea', 'ROK': 'South Korea',
+      'GERMANY': 'Germany', 'DEUTSCHLAND': 'Germany',
       'FRANCE': 'France',
       'ITALY': 'Italy',
       'SPAIN': 'Spain',
       'AUSTRALIA': 'Australia'
     };
 
-    let countryDetected = false;
     for (let key in countryMap) {
-      if (lastLine === key || lastLine.endsWith(' ' + key)) {
+      if (lastLine === key) {
         d.country = countryMap[key];
         working.pop();
-        countryDetected = true;
+        break;
+      } else if (lastLine.endsWith(' ' + key)) {
+        d.country = countryMap[key];
+        working[working.length - 1] = working[working.length - 1].slice(0, -(key.length)).trim().replace(/,$/, '').trim();
         break;
       }
     }
 
     if (!working.length) {
-      d.addr1 = lines.join(', ');
+      d.addr1 = originalBlock;
       return d;
     }
 
     // 2. Parse Geo (now last line)
     const geo = working.pop();
 
-    // US/Canada Pattern: "City, State Zip" or "City State Zip"
-    const usCaMatch = geo.match(/^(.*?)[,\s]+([A-Z]{2})\s+([A-Z0-9\s\-]{3,10})$/i);
-    if (usCaMatch) {
-      d.city = usCaMatch[1].trim();
-      d.state = usCaMatch[2].trim().toUpperCase();
+    // Robust US/Canada Pattern
+    // 1. "City, State Zip" or "City State Zip" (2-letter state)
+    let usCaMatch = geo.match(/^(.*?)[,\s]+([A-Z]{2})\s+(\d{5}(?:-\d{4})?|[A-Z]\d[A-Z]\s*\d[A-Z]\d)$/i);
+    if (!usCaMatch) {
+      // 1.1 Support cases with comma before zip or different spacing
+      usCaMatch = geo.match(/^(.*?)[,\s]+([A-Z]{2})[,\s]+(\d{5}(?:-\d{4})?|[A-Z]\d[A-Z]\s*\d[A-Z]\d)$/i);
+    }
+    if (!usCaMatch) {
+      // 2. Full State Name: "City, StateName Zip"
+      usCaMatch = geo.match(/^(.*?)[,\s]+([A-Za-z\s]{3,20})[,\s]+(\d{5}(?:-\d{4})?)$/i) ||
+                  geo.match(/^(.*?)[,\s]+([A-Za-z\s]{3,20})\s+(\d{5}(?:-\d{4})?)$/i);
+    }
+    if (!usCaMatch) {
+      // 3. Reversed Zip: "Zip City State"
+      usCaMatch = geo.match(/^(\d{5}(?:-\d{4})?)\s+(.*?)[,\s]+([A-Z]{2})$/i);
+      if (usCaMatch) {
+        d.zip = usCaMatch[1].trim().toUpperCase();
+        d.city = usCaMatch[2].trim();
+        d.state = usCaMatch[3].trim().toUpperCase();
+        d.success = true;
+      }
+    }
+
+    if (!d.success && usCaMatch) {
+      d.city = this.toTitleCase_(usCaMatch[1].trim());
+      d.state = this.mapStateToAbbr_(usCaMatch[2].trim());
       d.zip = usCaMatch[3].trim().toUpperCase();
+      d.success = true;
     }
     // UK Pattern: "City Postcode"
     else if (d.country === 'United Kingdom') {
@@ -302,16 +438,23 @@ var OMS_Utils = {
       if (ukMatch) {
         d.city = ukMatch[1].trim();
         d.zip = ukMatch[2].trim().toUpperCase();
+        d.success = true;
       } else {
         d.city = geo;
       }
     }
-    // JP/KR Pattern: "Zip City State" or "Zip State City"
+    // JP/KR Pattern: "[Zip] City" or "City Zip" or "Zip City"
     else if (d.country === 'Japan' || d.country === 'South Korea') {
-      const eastMatch = geo.match(/^\[?(\d{3,7}[-\s]?\d{0,4})\]?\s*(.*)$/);
+      const eastMatch = geo.match(/^\[?(\d{3,7}[-\s]?\d{0,4})\]?\s*(.*)$/) || geo.match(/^(.*?)\s+(\d{3,7}[-\s]?\d{0,4})$/);
       if (eastMatch) {
-        d.zip = eastMatch[1].trim();
-        d.city = eastMatch[2].trim();
+        if (isNaN(parseInt(eastMatch[1].charAt(0)))) { // Zip at end
+          d.city = eastMatch[1].trim();
+          d.zip = eastMatch[2].trim();
+        } else { // Zip at start
+          d.zip = eastMatch[1].trim();
+          d.city = eastMatch[2].trim();
+        }
+        d.success = (!!d.zip && !!d.city);
       } else {
         d.city = geo;
       }
@@ -327,20 +470,47 @@ var OMS_Utils = {
           d.zip = euMatch[1].trim();
           d.city = euMatch[2].trim();
         }
+        d.success = true;
       } else {
         d.city = geo;
       }
     }
 
     // 3. Addr1 is whatever is left
-    if (working.length) {
-      d.addr1 = working.join(', ');
-    } else if (!d.addr1) {
-      // Fallback if we have nothing left, use original lines
-      d.addr1 = lines.join(', ');
+    if (d.success) {
+      // If city extraction left commas, clean them
+      d.city = String(d.city || '').replace(/^,|,$/g, '').trim();
+      d.addr1 = working.length ? working.join(', ') : originalBlock;
+    } else {
+      d.city = ""; d.state = ""; d.zip = "";
+      d.addr1 = originalBlock;
     }
 
     return d;
+  },
+
+  mapStateToAbbr_(state) {
+    const s = String(state || '').trim().toUpperCase();
+    if (s.length === 2) return s;
+    const map = {
+      'ALABAMA': 'AL', 'ALASKA': 'AK', 'ARIZONA': 'AZ', 'ARKANSAS': 'AR', 'CALIFORNIA': 'CA', 'COLORADO': 'CO', 'CONNECTICUT': 'CT', 'DELAWARE': 'DE', 'FLORIDA': 'FL', 'GEORGIA': 'GA', 'HAWAII': 'HI', 'IDAHO': 'ID', 'ILLINOIS': 'IL', 'INDIANA': 'IN', 'IOWA': 'IA', 'KANSAS': 'KS', 'KENTUCKY': 'KY', 'LOUISIANA': 'LA', 'MAINE': 'ME', 'MARYLAND': 'MD', 'MASSACHUSETTS': 'MA', 'MICHIGAN': 'MI', 'MINNESOTA': 'MN', 'MISSISSIPPI': 'MS', 'MISSOURI': 'MO', 'MONTANA': 'MT', 'NEBRASKA': 'NE', 'NEVADA': 'NV', 'NEW HAMPSHIRE': 'NH', 'NEW JERSEY': 'NJ', 'NEW MEXICO': 'NM', 'NEW YORK': 'NY', 'NORTH CAROLINA': 'NC', 'NORTH DAKOTA': 'ND', 'OHIO': 'OH', 'OKLAHOMA': 'OK', 'OREGON': 'OR', 'PENNSYLVANIA': 'PA', 'RHODE ISLAND': 'RI', 'SOUTH CAROLINA': 'SC', 'SOUTH DAKOTA': 'SD', 'TENNESSEE': 'TN', 'TEXAS': 'TX', 'UTAH': 'UT', 'VERMONT': 'VT', 'VIRGINIA': 'VA', 'WASHINGTON': 'WA', 'WEST VIRGINIA': 'WV', 'WISCONSIN': 'WI', 'WYOMING': 'WY'
+    };
+    return map[s] || s;
+  },
+
+  toTitleCase_(str) {
+    if (!str) return '';
+    return str.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+  },
+
+  decodeHtmlEntities_(text) {
+    if (!text) return '';
+    return String(text)
+      .replace(/&#39;/g, "'")
+      .replace(/&quot;/g, '"')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>');
   },
 
   normalizeDateYYYYMMDD(dateStr) {
@@ -351,5 +521,40 @@ var OMS_Utils = {
     const month = String(d.getMonth() + 1).padStart(2, '0');
     const day = String(d.getDate()).padStart(2, '0');
     return `${year}-${month}-${day}`;
+  },
+
+  /********************************
+   * UI Helpers
+   ********************************/
+  applyBanding_(sheet) {
+    const lr = sheet.getMaxRows();
+    const lc = sheet.getLastColumn();
+    if (lr < 2 || lc < 1) return;
+
+    const range = sheet.getRange(2, 1, lr - 1, lc);
+    range.getBandings().forEach(b => b.remove());
+    range.applyRowBanding(SpreadsheetApp.BandingTheme.LIGHT_GREY, false, false)
+      .setFirstRowColor('#FFFFFF')
+      .setSecondRowColor('#F8FAFC');
+  },
+
+  applySectionShading_(sheet, map, sections) {
+    const lr = sheet.getMaxRows();
+    sections.forEach(sec => {
+      Object.keys(map).forEach(h => {
+        let match = false;
+        sec.headers.forEach(pattern => {
+          if (pattern.endsWith('*')) {
+            const prefix = pattern.slice(0, -1).toLowerCase();
+            if (h.startsWith(prefix)) match = true;
+          } else if (h === pattern.toLowerCase()) {
+            match = true;
+          }
+        });
+        if (match) {
+          sheet.getRange(1, map[h], lr, 1).setBackground(sec.color);
+        }
+      });
+    });
   },
 };
