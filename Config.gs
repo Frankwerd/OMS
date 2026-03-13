@@ -5,13 +5,39 @@ const OMS_CONFIG = {
   // Standalone script: REQUIRED
   SPREADSHEET_ID: '1I7l8LrFjdNQePw5gcVBiSoKAm3RdX9wqmUbHVFV4tuA',
 
+  SCHEMA_VERSION: '1.4.0',
+
   TZ: Session.getScriptTimeZone(),
+
+  PACKAGE_DEFAULTS: {
+    WEIGHT_KG: 1.5,
+    WIDTH_CM: 106,
+    LENGTH_CM: 16.5,
+    HEIGHT_CM: 8.5,
+  },
+
+  STAND_DEFAULTS: {
+    WEIGHT_KG: 2.2,
+    WIDTH_CM: 108,
+    LENGTH_CM: 20,
+    HEIGHT_CM: 15,
+  },
+
+  ERRORS: {
+    MISSING_ORDER_ID: 'ERR_NO_ORDER_ID',
+    MISSING_EMAIL: 'ERR_NO_EMAIL',
+    MISSING_ADDRESS: 'ERR_NO_ADDRESS',
+    AMBIGUOUS_ITEMS: 'ERR_AMBIGUOUS_ITEMS',
+    MISSING_SKU_MAPPING: 'ERR_MISSING_SKU',
+  },
 
   TABS: {
     INBOUND: 'Inbound_Orders',
     OUTBOUND: 'Outbound_Logistics',
-    MASTER: 'Master_OMS_View',
+    DASHBOARD: 'Master_OMS_Dashboard',
+    MASTER_TABLE: 'Master_OMS_Table',
     META: '_Meta',
+    DASHBOARD_DATA: '_Dashboard_Data',
   },
 
   CUSTOMER_ID_PREFIX: 'C',
