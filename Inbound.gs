@@ -534,156 +534,165 @@ function inbound_runSamCart() {
 
   const existing = inbound_collectExistingMessageIds_(inbound, cols['system-gmail-id']);
 
-  threads.reverse().forEach(thread => {
-    let okThread = true;
-
-    thread.getMessages().forEach(msg => {
-      const msgId = String(msg.getId() || '').trim().toLowerCase();
-      if (!msgId || existing.has(msgId)) return;
-
-      try {
-        const clean = OMS_Utils.ultraCleanText_(msg.getBody());
-        const msgDate = msg.getDate();
-        const purchaseTime = Utilities.formatDate(msgDate, OMS_CONFIG.TZ, 'HH:mm');
-        const parsed = inbound_parseSamCartInvoice_(clean, purchaseTime);
-
-        // Standardize reshipments as Outbound-only
-        if (String(parsed.orderId).toUpperCase().endsWith(OMS_CONFIG.RESHIP_SUFFIX)) return;
-
-        const buyerEmail = OMS_Utils.normalizeEmail_(parsed.buyerEmail);
-        const customerId = buyerEmail ? OMS_Utils.lookupOrCreateCustomerId_(buyerEmail) : 'C-UNKNOWN';
-        const emailHash = buyerEmail ? OMS_Utils.emailHash_(buyerEmail) : '';
-
-        const sourceSystem = OMS_CONFIG.SOURCE_SYSTEMS.SAMCART;
-        const sourceOrderId = parsed.orderId;
-        const omsOrderId = OMS_Utils.buildOmsOrderId_(sourceSystem, sourceOrderId);
-
-        const orderCreatedAt = (parsed.purchaseDate && parsed.purchaseTime)
-          ? `${parsed.purchaseDate}T${parsed.purchaseTime}:00`
-          : Utilities.formatDate(msgDate, OMS_CONFIG.TZ, "yyyy-MM-dd'T'HH:mm:ss");
-
-        const orderSourceEmail = String(msg.getFrom() || '').match(/<([^>]+)>/)?.[1] || msg.getFrom();
-
-        const now = new Date();
-        const stamp = Utilities.formatDate(now, OMS_CONFIG.TZ, 'yyyy-MM-dd HH:mm:ss');
-
-        const rows = [];
-        const stubData = [];
-        parsed.items.forEach((it, idx) => {
-          const lineItemIndex = idx + 1;
-          const sourceOrderItemId = OMS_Utils.generateLineItemId_(lineItemIndex);
-          const omsOrderItemId = OMS_Utils.buildOmsOrderItemId_(omsOrderId, sourceOrderItemId);
-
-          // Derive SKU if not present or placeholder
-          if (!it.sku || it.sku === 'SAMCART-UNMAPPED') {
-            it.sku = OMS_Utils.deriveSku(it);
-          }
-
-          rows.push(inbound_buildRowFromHeaders_(cols, inbound.getLastColumn(), {
-            // core ids
-            merchantOrderId: sourceOrderId,
-            merchantOrderItemId: sourceOrderItemId,
-            lineItemIndex,
-
-            purchaseDate: parsed.purchaseDate,
-            purchaseTime: parsed.purchaseTime,
-            orderCreatedAt,
-
-            buyerEmail,
-            buyerName: parsed.buyerName,
-            buyerPhone: parsed.buyerPhone,
-
-            customerId,
-            systemGmailId: msgId,
-            orderSourceEmail,
-
-            salesChannel: 'SamCart',
-            customerClassification: 'Active',
-            isBusinessOrder: 'false',
-
-            sku: it.sku,
-            productName: OMS_Utils.decodeHtmlEntities_(it.productName || parsed.productName),
-            magSafeStand: it.magSafeStand,
-            model: it.model || parsed.model,
-            clubType: it.clubType || parsed.clubType,
-            productCategory: 'Golf Club',
-            hand: it.hand || parsed.hand,
-            flex: it.flex || parsed.flex,
-            shaftLengthOption: it.length || parsed.length,
-            gripSize: it.gripSize || parsed.gripSize,
-
-            qty: it.quantity || parsed.quantity || 1,
-            currency: 'USD',
-            itemPrice: it.price || parsed.subtotal,
-            itemTax: parsed.tax,
-            shippingPrice: parsed.shipping,
-            totalAmount: parsed.totalAmount,
-            couponCode: parsed.couponCode,
-            discountAmount: parsed.discount,
-            refundAmount: parsed.refundAmount,
-            refundDate: parsed.refundDate,
-            returnReasonCode: parsed.returnReasonCode,
-
-            recipientName: parsed.recipientName || parsed.buyerName,
-            shipAddr1: parsed.shipAddr1,
-            shipCity: parsed.shipCity,
-            shipState: parsed.shipState,
-            shipPostal: parsed.shipPostal,
-            shipCountry: parsed.shipCountry || 'United States',
-            shipServiceLevel: parsed.shipServiceLevel,
-
-            // ops fields
-            serialAllocated: '',
-            notes: parsed.parseNotes || '',
-            automationNotes: '',
-            itemLifeCycle: 'ACTIVE',
-            orderLifeCycle: (Number(parsed.refundAmount || 0) > 0 ? 'PARTIAL_REFUND' : 'ACTIVE'),
-            parseStatus: parsed.parseStatus || 'OK',
-
-            createdAt: stamp,
-            updatedAt: stamp,
-
-            // canonical
-            sourceSystem,
-            sourceOrderId,
-            sourceOrderItemId,
-            omsOrderId,
-            omsOrderItemId,
-            buyerEmailHash: emailHash,
-          }));
-
-          stubData.push({
-            merchantOrderId: sourceOrderId,
-            merchantOrderItemId: sourceOrderItemId,
-            sku: it.sku,
-            customerId,
-            omsOrderId,
-            omsOrderItemId,
-            magSafeStand: it.magSafeStand,
-            orderCreatedAt,
-            deliveryCountry: parsed.shipCountry || 'United States',
-          });
-        });
-
-        if (!rows.length) throw new Error('No items parsed from SamCart invoice.');
-
-        inbound.getRange(inbound.getLastRow() + 1, 1, rows.length, rows[0].length)
-          .setValues(rows);
-
-        // Create Outbound stubs
-        outbound_createStubs_(stubData);
-
-        existing.add(msgId);
-
-      } catch (err) {
-        okThread = false;
-        OMS_Utils.opsAlert_(
-          `SamCart parse/write failed.\nThread: ${thread.getId()}\nMsg: ${msg.getId()}\nError: ${err.message}`
-        );
-      }
+  // Flatten and sort messages by date oldest first
+  const allMessages = [];
+  threads.forEach(t => {
+    t.getMessages().forEach(m => {
+      allMessages.push({ msg: m, thread: t });
     });
+  });
+  allMessages.sort((a, b) => a.msg.getDate().getTime() - b.msg.getDate().getTime());
 
-    if (okThread) {
+  const threadStatus = {}; // map threadId to { ok: true }
+
+  allMessages.forEach(({ msg, thread }) => {
+    const tId = thread.getId();
+    if (threadStatus[tId] === undefined) threadStatus[tId] = true;
+
+    const msgId = String(msg.getId() || '').trim().toLowerCase();
+    if (!msgId || existing.has(msgId)) return;
+
+    try {
+      const clean = OMS_Utils.ultraCleanText_(msg.getBody());
+      const msgDate = msg.getDate();
+      const purchaseTime = Utilities.formatDate(msgDate, OMS_CONFIG.TZ, 'HH:mm');
+      const parsed = inbound_parseSamCartInvoice_(clean, purchaseTime);
+
+      // Skip non-invoice emails (e.g. customer replies in same thread)
+      if (parsed.parseStatus === OMS_CONFIG.ERRORS.MISSING_ORDER_ID) return;
+
+      // Standardize reshipments as Outbound-only
+      if (String(parsed.orderId).toUpperCase().endsWith(OMS_CONFIG.RESHIP_SUFFIX)) return;
+
+      const buyerEmail = OMS_Utils.normalizeEmail_(parsed.buyerEmail);
+      const customerId = buyerEmail ? OMS_Utils.lookupOrCreateCustomerId_(buyerEmail) : 'C-UNKNOWN';
+      const emailHash = buyerEmail ? OMS_Utils.emailHash_(buyerEmail) : '';
+
+      const sourceSystem = OMS_CONFIG.SOURCE_SYSTEMS.SAMCART;
+      const sourceOrderId = parsed.orderId;
+      const omsOrderId = OMS_Utils.buildOmsOrderId_(sourceSystem, sourceOrderId);
+
+      const orderCreatedAt = (parsed.purchaseDate && parsed.purchaseTime)
+        ? `${parsed.purchaseDate}T${parsed.purchaseTime}:00`
+        : Utilities.formatDate(msgDate, OMS_CONFIG.TZ, "yyyy-MM-dd'T'HH:mm:ss");
+
+      const orderSourceEmail = String(msg.getFrom() || '').match(/<([^>]+)>/)?.[1] || msg.getFrom();
+
+      const now = new Date();
+      const stamp = Utilities.formatDate(now, OMS_CONFIG.TZ, 'yyyy-MM-dd HH:mm:ss');
+
+      const rows = [];
+      const stubData = [];
+      parsed.items.forEach((it, idx) => {
+        const lineItemIndex = idx + 1;
+        const sourceOrderItemId = OMS_Utils.generateLineItemId_(lineItemIndex);
+        const omsOrderItemId = OMS_Utils.buildOmsOrderItemId_(omsOrderId, sourceOrderItemId);
+
+        // Derive SKU if not present or placeholder
+        if (!it.sku || it.sku === 'SAMCART-UNMAPPED') {
+          it.sku = OMS_Utils.deriveSku(it);
+        }
+
+        rows.push(inbound_buildRowFromHeaders_(cols, inbound.getLastColumn(), {
+          merchantOrderId: sourceOrderId,
+          merchantOrderItemId: sourceOrderItemId,
+          lineItemIndex,
+          purchaseDate: parsed.purchaseDate,
+          purchaseTime: parsed.purchaseTime,
+          orderCreatedAt,
+          buyerEmail,
+          buyerName: parsed.buyerName,
+          buyerPhone: parsed.buyerPhone,
+          customerId,
+          systemGmailId: msgId,
+          orderSourceEmail,
+          salesChannel: 'SamCart',
+          customerClassification: 'Active',
+          isBusinessOrder: 'false',
+          sku: it.sku,
+          productName: OMS_Utils.decodeHtmlEntities_(it.productName || parsed.productName),
+          magSafeStand: it.magSafeStand,
+          model: it.model || parsed.model,
+          clubType: it.clubType || parsed.clubType,
+          productCategory: 'Golf Club',
+          hand: it.hand || parsed.hand,
+          flex: it.flex || parsed.flex,
+          shaftLengthOption: it.length || parsed.length,
+          gripSize: it.gripSize || parsed.gripSize,
+          qty: it.quantity || parsed.quantity || 1,
+          currency: 'USD',
+          itemPrice: it.price || parsed.subtotal,
+          itemTax: parsed.tax,
+          shippingPrice: parsed.shipping,
+          totalAmount: parsed.totalAmount,
+          couponCode: parsed.couponCode,
+          discountAmount: parsed.discount,
+          refundAmount: parsed.refundAmount,
+          refundDate: parsed.refundDate,
+          returnReasonCode: parsed.returnReasonCode,
+          recipientName: parsed.recipientName || parsed.buyerName,
+          shipAddr1: parsed.shipAddr1,
+          shipCity: parsed.shipCity,
+          shipState: parsed.shipState,
+          shipPostal: parsed.shipPostal,
+          shipCountry: parsed.shipCountry || 'United States',
+          shipServiceLevel: parsed.shipServiceLevel,
+          serialAllocated: '',
+          notes: parsed.parseNotes || '',
+          automationNotes: '',
+          itemLifeCycle: 'ACTIVE',
+          orderLifeCycle: (Number(parsed.refundAmount || 0) > 0 ? 'PARTIAL_REFUND' : 'ACTIVE'),
+          parseStatus: parsed.parseStatus || 'OK',
+          createdAt: stamp,
+          updatedAt: stamp,
+          sourceSystem,
+          sourceOrderId,
+          sourceOrderItemId,
+          omsOrderId,
+          omsOrderItemId,
+          buyerEmailHash: emailHash,
+        }));
+
+        stubData.push({
+          merchantOrderId: sourceOrderId,
+          merchantOrderItemId: sourceOrderItemId,
+          sku: it.sku,
+          customerId,
+          omsOrderId,
+          omsOrderItemId,
+          magSafeStand: it.magSafeStand,
+          orderCreatedAt,
+          deliveryCountry: parsed.shipCountry || 'United States',
+        });
+      });
+
+      if (!rows.length) throw new Error('No items parsed from SamCart invoice.');
+
+      inbound.getRange(inbound.getLastRow() + 1, 1, rows.length, rows[0].length)
+        .setValues(rows);
+
+      // Create Outbound stubs
+      outbound_createStubs_(stubData);
+
+      // Slack notification (once per order)
+      parsed.customerId = customerId;
+      parsed.salesChannel = 'SamCart';
+      OMS_Utils.sendSlackOrderNotification(parsed);
+
+      existing.add(msgId);
+
+    } catch (err) {
+      threadStatus[tId] = false;
+      OMS_Utils.opsAlert_(
+        `SamCart parse/write failed.\nThread: ${thread.getId()}\nMsg: ${msg.getId()}\nError: ${err.message}`
+      );
+    }
+  });
+
+  // Finalize threads
+  threads.forEach(thread => {
+    const ok = threadStatus[thread.getId()];
+    if (ok) {
       thread.removeLabel(labels.toProcess).addLabel(labels.processed).moveToArchive();
     } else {
       thread.removeLabel(labels.toProcess).addLabel(labels.error);

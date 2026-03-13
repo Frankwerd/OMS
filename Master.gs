@@ -4,6 +4,32 @@
 
 function refreshMasterOmsTable() {
   const ss = OMS_Utils.ss();
+  const ui = SpreadsheetApp.getUi();
+
+  // 1. Prompt for date range
+  let startDate = null, endDate = null;
+  const response = ui.prompt('Refresh Master Table', 'Enter date range (e.g. 2024-01-01 to 2024-01-31) or leave blank for all:', ui.ButtonSet.OK_CANCEL);
+  if (response.getSelectedButton() !== ui.Button.OK) return;
+
+  const input = response.getResponseText().trim();
+  if (input) {
+    const parts = input.split(/ to | - |,/i);
+    startDate = new Date(parts[0].trim());
+    if (parts.length > 1) {
+      endDate = new Date(parts[1].trim());
+    } else {
+      endDate = new Date(startDate); // Single day
+    }
+    // Set boundaries to start/end of day
+    if (!isNaN(startDate.getTime())) startDate.setHours(0,0,0,0);
+    if (!isNaN(endDate.getTime())) endDate.setHours(23,59,59,999);
+
+    if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
+      ui.alert('Invalid date format. Proceeding with all records.');
+      startDate = null; endDate = null;
+    }
+  }
+
   const inbound = OMS_Utils.sheet_(OMS_CONFIG.TABS.INBOUND);
   const outbound = OMS_Utils.sheet_(OMS_CONFIG.TABS.OUTBOUND);
   const masterTable = OMS_Utils.sheet_(OMS_CONFIG.TABS.MASTER_TABLE);
@@ -64,6 +90,13 @@ function refreshMasterOmsTable() {
   inData.forEach(inRow => {
     const omsItem = String(inRow[inCols['oms-order-item-id'] - 1] || '').trim();
     if (!omsItem) return;
+
+    // Filter by date if range provided
+    const pDateVal = inRow[inCols['purchase-date'] - 1];
+    if (startDate && endDate && pDateVal) {
+      const pDate = (pDateVal instanceof Date) ? pDateVal : new Date(pDateVal);
+      if (isNaN(pDate.getTime()) || pDate < startDate || pDate > endDate) return;
+    }
 
     const o = outMap.get(omsItem);
     const serialScanned = o ? String(o[outCols['serial-number-scanned'] - 1] || '').trim() : '';

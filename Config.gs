@@ -37,6 +37,7 @@ const OMS_CONFIG = {
     DASHBOARD: 'Master_OMS_Dashboard',
     MASTER_TABLE: 'Master_OMS_Table',
     META: '_Meta',
+    DASHBOARD_DATA: '_Dashboard_Data',
   },
 
   CUSTOMER_ID_PREFIX: 'C',

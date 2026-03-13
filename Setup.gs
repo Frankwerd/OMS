@@ -549,16 +549,20 @@ function styleOutbound_(sheet) {
 /** ---------------- DASHBOARD (MERGE SAFE) ---------------- **/
 
 function buildDashboard_(sheet) {
-  // ✅ FIX: remove any existing filter before merges (even though we don’t create one)
+  // ✅ FIX: remove any existing filter before merges
   const f = sheet.getFilter();
   if (f) f.remove();
+
+  // Preserve existing dates if they exist
+  const existingStart = sheet.getRange('B3').getValue();
+  const existingEnd = sheet.getRange('D3').getValue();
 
   sheet.clear();
   sheet.setHiddenGridlines(true);
 
-  // Title row merge (safe now)
-  sheet.getRange(1,1).setValue('G·GRIP OMS Dashboard');
-  sheet.getRange(1,1,1,6).merge()
+  // Title
+  sheet.getRange(1, 1).setValue('G·GRIP OMS Dashboard');
+  sheet.getRange(1, 1, 1, 6).merge()
     .setBackground('#111827')
     .setFontColor('#FFFFFF')
     .setFontSize(16)
@@ -566,97 +570,159 @@ function buildDashboard_(sheet) {
     .setVerticalAlignment('middle');
   sheet.setRowHeight(1, 40);
 
-  sheet.getRange(2,1).setValue('Manual dashboard. No triggers are created automatically.');
-  sheet.getRange(2,1,1,6).merge().setFontColor('#374151');
+  sheet.getRange(2, 1).setValue('Manual dashboard. No triggers are created automatically.');
+  sheet.getRange(2, 1, 1, 6).merge().setFontColor('#374151');
   sheet.setRowHeight(2, 22);
 
-  // simple metric table layout (you asked to plan + build dashboard now)
-  sheet.getRange(4,1).setValue('Metric').setFontWeight('bold');
-  sheet.getRange(4,2).setValue('Value').setFontWeight('bold');
-  sheet.getRange(4,3).setValue('Notes').setFontWeight('bold');
-  sheet.getRange(4,1,1,3).setBackground('#EFEFEF');
+  // Date Range Controls
+  sheet.getRange('A3').setValue('Start Date:').setFontWeight('bold');
+  sheet.getRange('C3').setValue('End Date:').setFontWeight('bold');
 
-  const IN = OMS_CONFIG.TABS.INBOUND;
-  const OUT = OMS_CONFIG.TABS.OUTBOUND;
+  const startCell = sheet.getRange('B3');
+  const endCell = sheet.getRange('D3');
+
+  startCell.setDataValidation(SpreadsheetApp.newDataValidation().requireDate().build()).setNumberFormat('yyyy-mm-dd');
+  endCell.setDataValidation(SpreadsheetApp.newDataValidation().requireDate().build()).setNumberFormat('yyyy-mm-dd');
+
+  if (existingStart instanceof Date) startCell.setValue(existingStart);
+  else {
+    const d = new Date(); d.setDate(1); startCell.setValue(d);
+  }
+  if (existingEnd instanceof Date) endCell.setValue(existingEnd);
+  else endCell.setValue(new Date());
+
+  // Simple metric table layout
+  sheet.getRange(5, 1).setValue('Metric').setFontWeight('bold');
+  sheet.getRange(5, 2).setValue('Value').setFontWeight('bold');
+  sheet.getRange(5, 3).setValue('Notes').setFontWeight('bold');
+  sheet.getRange(5, 1, 1, 3).setBackground('#EFEFEF');
+
+  const MST = OMS_CONFIG.TABS.MASTER_TABLE;
   const META = OMS_CONFIG.TABS.META;
 
-  // Helper for meta-based range
-  const metaRng = (s, h) => `INDIRECT("'"&${IN}!A1&"'!"&VLOOKUP("${s}|${h}",{${META}!A:A&"|"&${META}!B:B,${META}!D:D},2,FALSE)&":"&VLOOKUP("${s}|${h}",{${META}!A:A&"|"&${META}!B:B,${META}!D:D},2,FALSE))`.replace(`${IN}!A1`, `"${s}"`);
-
-  // Actually, Apps Script string templates are easier. Let's use a function.
-  // We use VLOOKUP against the _Meta sheet which contains sheet|header in Col A (if concatenated)
-  // or we can use a simpler lookup since Col A=Sheet, Col B=Header.
-  // Using INDEX(MATCH(..., INDEX(JOINED_RANGE, 0), 0)) to handle array context in standard formulas.
   const lookup_ = (s, h) => `INDEX('${META}'!$D$1:$D, MATCH("${s}|${h}", INDEX('${META}'!$A$1:$A & "|" & '${META}'!$B$1:$B, 0), 0))`;
-  const col_ = (s, h) => `INDIRECT("'"&"${s}"&"'!" & ${lookup_(s,h)} & ":" & ${lookup_(s,h)})`;
+  const col_ = (s, h) => `INDIRECT("'"&"${s}"&"'!" & ${lookup_(s, h)} & ":" & ${lookup_(s, h)})`;
 
-  // Week / month anchors
-  sheet.getRange('E4').setValue('WeekStart');
-  sheet.getRange('F4').setFormula('=TODAY()-WEEKDAY(TODAY(),2)+1');
-  sheet.getRange('E5').setValue('MonthStart');
-  sheet.getRange('F5').setFormula('=EOMONTH(TODAY(),-1)+1');
+  const mstCol = (h) => col_(MST, h);
 
   let r = 6;
 
-  // Weekly & Monthly inbound/outbound
-  putMetric_(sheet, r++, 'Inbound Items (This Week)', `=COUNTIFS(${col_(IN, 'purchase-date')},">="&$F$4,${col_(IN, 'purchase-date')},"<"&$F$4+7)`, '');
-  putMetric_(sheet, r++, 'Inbound Items (This Month)', `=COUNTIFS(${col_(IN, 'purchase-date')},">="&$F$5,${col_(IN, 'purchase-date')},"<"&EOMONTH(TODAY(),0)+1)`, '');
+  // Period Metrics (from Master Table for consistency)
+  const mstPD = mstCol('purchase-date');
+  const dateFilter = `${mstPD},">="&$B$3,${mstPD},"<="&$D$3`;
 
-  putMetric_(sheet, r++, 'Outbound US Shipped (This Week)', `=COUNTIFS(${col_(OUT, 'us-ship-date')},">="&$F$4,${col_(OUT, 'us-ship-date')},"<"&$F$4+7)`, '');
-
-  putMetric_(sheet, r++, 'Delivered (This Week)', `=COUNTIFS(${col_(OUT, 'delivered-date')},">="&$F$4,${col_(OUT, 'delivered-date')},"<"&$F$4+7)`, '');
+  putMetric_(sheet, r++, 'Inbound Items (In Range)', `=COUNTIFS(${dateFilter})`, '');
+  putMetric_(sheet, r++, 'Outbound US Shipped (In Range)', `=COUNTIFS(${mstCol('us-ship-date')},">="&$B$3,${mstCol('us-ship-date')},"<="&$D$3)`, '');
+  putMetric_(sheet, r++, 'Delivered (In Range)', `=COUNTIFS(${mstCol('delivered-date')},">="&$B$3,${mstCol('delivered-date')},"<="&$D$3)`, '');
 
   r++;
 
-  // Logistics Velocity
-  const inPD = col_(IN, 'purchase-date');
-  const outHD = col_(OUT, 'hub-received-date');
-  const outUSD = col_(OUT, 'us-ship-date');
-  const outDD = col_(OUT, 'delivered-date');
+  // Logistics Velocity (Calculated using Master Table joins)
+  const mstHD = mstCol('hub-received-date');
+  const mstUSD = mstCol('us-ship-date');
+  const mstDD = mstCol('delivered-date');
+  const velFilter = `(${mstPD}>=$B$3)*(${mstPD}<=$D$3)`;
 
-  putMetric_(sheet, r++, 'Avg Time to Hub (days)', `=IFERROR(AVERAGE(FILTER(${outHD}-${inPD}, (${outHD}<>"")*(${inPD}<>""))),"")`, 'purchase-date → hub-received-date');
-  putMetric_(sheet, r++, 'Avg Customs Clearance (days)', `=IFERROR(AVERAGE(FILTER(${outUSD}-${outHD}, (${outUSD}<>"")*(${outHD}<>""))),"")`, 'hub → us-ship');
-  putMetric_(sheet, r++, 'Avg Last Mile (days)', `=IFERROR(AVERAGE(FILTER(${outDD}-${outUSD}, (${outDD}<>"")*(${outUSD}<>""))),"")`, 'us-ship → delivered');
-  putMetric_(sheet, r++, 'Avg Click-to-Door (days)', `=IFERROR(AVERAGE(FILTER(${outDD}-${inPD}, (${outDD}<>"")*(${inPD}<>""))),"")`, 'purchase → delivered');
+  putMetric_(sheet, r++, 'Avg Time to Hub (days)', `=IFERROR(AVERAGE(FILTER(${mstHD}-${mstPD}, (${mstHD}<>"")*(${mstPD}<>"")*${velFilter})),"")`, 'purchase → hub-received');
+  putMetric_(sheet, r++, 'Avg Customs Clearance (days)', `=IFERROR(AVERAGE(FILTER(${mstUSD}-${mstHD}, (${mstUSD}<>"")*(${mstHD}<>"")*${velFilter})),"")`, 'hub → us-ship');
+  putMetric_(sheet, r++, 'Avg Last Mile (days)', `=IFERROR(AVERAGE(FILTER(${mstDD}-${mstUSD}, (${mstDD}<>"")*(${mstUSD}<>"")*${velFilter})),"")`, 'us-ship → delivered');
+  putMetric_(sheet, r++, 'Avg Click-to-Door (days)', `=IFERROR(AVERAGE(FILTER(${mstDD}-${mstPD}, (${mstDD}<>"")*(${mstPD}<>"")*${velFilter})),"")`, 'purchase → delivered');
 
   r++;
 
   // Backlog Monitor
-  putMetric_(sheet, r++, 'Hub Backlog', `=COUNTIFS(${col_(OUT, 'domestic-tracking-kr')},"<>",${col_(OUT, 'international-tracking-us')},"")`, 'KR tracking present, US tracking empty');
-
-  putMetric_(sheet, r++, 'S/N Mismatch Count', `=COUNTIF(${col_(OUT, 'sn-verify')},"MISMATCH")`, '');
+  putMetric_(sheet, r++, 'Hub Backlog', `=COUNTIFS(${mstCol('domestic-tracking-kr')},"<>",${mstCol('international-tracking-us')},"")`, 'KR tracking present, US tracking empty');
+  putMetric_(sheet, r++, 'S/N Mismatch Count', `=COUNTIF(${mstCol('sn-verify')},"MISMATCH")`, '');
 
   r++;
 
-  // -RES / Refunds
-  const inOID = col_(IN, 'merchant-order-id');
+  // Financials & Health
   const reshipPattern = `"*${OMS_CONFIG.RESHIP_SUFFIX}*"`;
-  putMetric_(sheet, r++, 'Reshipment Rate (%)', `=IFERROR(COUNTIF(${inOID}, ${reshipPattern})/MAX(1,COUNTA(${inOID})-1),"")`, '');
-
-  putMetric_(sheet, r++, 'Total Lost Revenue', `=IFERROR(SUM(${col_(IN, 'refund-amount')}),0)`, 'Sum refund-amount');
+  putMetric_(sheet, r++, 'Reshipment Rate (%)', `=IFERROR(COUNTIFS(${mstCol('merchant-order-id')}, ${reshipPattern}, ${mstPD}, ">="&$B$3, ${mstPD}, "<="&$D$3)/MAX(1,COUNTIFS(${dateFilter})),"")`, '');
+  putMetric_(sheet, r++, 'Total Lost Revenue (In Range)', `=IFERROR(SUMIFS(${mstCol('refund-amount')}, ${mstPD}, ">="&$B$3, ${mstPD}, "<="&$D$3),0)`, 'Sum refund-amount');
+  putMetric_(sheet, r++, 'Total LTV (In Range)', `=IFERROR(SUMIFS(${mstCol('total-amount')}, ${mstPD}, ">="&$B$3, ${mstPD}, "<="&$D$3),0)`, 'Sum of total-amount');
 
   r++;
 
-  // More detailed metrics
-  const inEmail = col_(IN, 'buyer-email');
-  putMetric_(sheet, r++, 'Repeat Purchase Rate (%)', `=IFERROR((COUNTA(${inEmail})-1-COUNTUNIQUE(${inEmail}))/(COUNTA(${inEmail})-1),"")`, 'Total items - unique emails / total items');
+  // Customer Loyalty
+  const mstEmail = mstCol('buyer-email');
+  putMetric_(sheet, r++, 'Repeat Purchase Rate (%)', `=IFERROR((COUNTIFS(${dateFilter})-COUNTUNIQUE(FILTER(${mstEmail}, (${mstPD}>=$B$3)*(${mstPD}<=$D$3))))/COUNTIFS(${dateFilter}),"")`, 'Total items - unique emails / total items');
 
-  putMetric_(sheet, r++, 'Total LTV', `=SUM(${col_(IN, 'total-amount')})`, 'Sum of total-amount across all orders');
+  r++;
 
-  const inRR = col_(IN, 'return-reason-code');
-  putMetric_(sheet, r++, 'Top Return Reason', `=IFERROR(INDEX(${inRR}, MATCH(MAX(COUNTIF(${inRR}, ${inRR})), COUNTIF(${inRR}, ${inRR}), 0)), "")`, 'Most frequent return reason');
+  // Charts Integration
+  const dataSheet = getOrCreateSheet_(ss, OMS_CONFIG.TABS.DASHBOARD_DATA);
+  dataSheet.hideSheet();
+  buildDashboardData_(dataSheet, mstCol);
+
+  addDashboardCharts_(sheet, dataSheet);
 
   // Cosmetics
   sheet.setColumnWidth(1, 320);
   sheet.setColumnWidth(2, 220);
   sheet.setColumnWidth(3, 420);
-  sheet.getRange(4,1,60,3).setFontFamily('Arial').setFontSize(10);
+  sheet.getRange(5, 1, 60, 3).setFontFamily('Arial').setFontSize(10);
 }
 
 function putMetric_(sheet, row, label, formula, notes) {
   sheet.getRange(row, 1).setValue(label).setFontWeight('bold');
   sheet.getRange(row, 2).setFormula(formula);
   sheet.getRange(row, 3).setValue(notes || '');
+}
+
+/**
+ * Builds source data for charts in a hidden sheet.
+ */
+function buildDashboardData_(sheet, mstCol) {
+  sheet.clear();
+  const IN = OMS_CONFIG.TABS.INBOUND;
+  const MST = OMS_CONFIG.TABS.MASTER_TABLE;
+
+  // 1. Inbound Items by Day (Last 30 Days)
+  sheet.getRange('A1').setValue('Inbound Trend (Last 30 Days)');
+  sheet.getRange('A2').setValue('Date');
+  sheet.getRange('B2').setValue('Items');
+  sheet.getRange('A3').setFormula('=ARRAYFORMULA(TODAY()-30+ROW(A1:A31))');
+  sheet.getRange('B3').setFormula(`=ARRAYFORMULA(COUNTIFS(${mstCol('purchase-date')}, A3:A33))`);
+
+  // 2. Outbound Status Distribution
+  sheet.getRange('D1').setValue('Current Outbound Status');
+  sheet.getRange('D2').setFormula(`=QUERY(${mstCol('outbound-status')}, "SELECT Col1, COUNT(Col1) WHERE Col1 IS NOT NULL GROUP BY Col1 LABEL COUNT(Col1) 'Count'", 0)`);
+}
+
+/**
+ * Adds charts to the Dashboard sheet.
+ */
+function addDashboardCharts_(sheet, dataSheet) {
+  // Remove existing charts
+  const charts = sheet.getCharts();
+  charts.forEach(c => sheet.removeChart(c));
+
+  // 1. Inbound Line Chart
+  const inboundChart = sheet.newChart()
+    .setChartType(Charts.ChartType.LINE)
+    .addRange(dataSheet.getRange('A2:B33'))
+    .setPosition(22, 1, 0, 0)
+    .setOption('title', 'Inbound Velocity (Last 30 Days)')
+    .setOption('legend', { position: 'none' })
+    .setOption('vAxis', { title: 'Items' })
+    .setOption('hAxis', { title: 'Date' })
+    .setOption('width', 600)
+    .setOption('height', 300)
+    .build();
+
+  // 2. Status Pie Chart
+  const statusChart = sheet.newChart()
+    .setChartType(Charts.ChartType.PIE)
+    .addRange(dataSheet.getRange('D2:E10'))
+    .setPosition(22, 3, 0, 0)
+    .setOption('title', 'Outbound Pipeline Status')
+    .setOption('width', 400)
+    .setOption('height', 300)
+    .build();
+
+  sheet.insertChart(inboundChart);
+  sheet.insertChart(statusChart);
 }
 
 /** ---------------- Formatting Helpers ---------------- **/

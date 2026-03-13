@@ -136,34 +136,64 @@ var OMS_Utils = {
 
   /********************************
    * Customer ID: CYYYYMMDD-###
+   * Redesigned to scan sheet for max sequence (no ScriptProperties)
    ********************************/
   lookupOrCreateCustomerId_(buyerEmail) {
     const email = this.normalizeEmail_(buyerEmail);
     if (!email) throw new Error('Missing buyer-email for customer-id.');
 
+    // Local execution cache to handle multiple items/orders for same NEW customer in one batch
+    if (!this._cidCache) this._cidCache = {};
+    if (this._cidCache[email]) return this._cidCache[email];
+
     const inbound = this.sheet_(OMS_CONFIG.TABS.INBOUND);
     const cols = this.requireCols_(inbound, ['buyer-email', 'customer-id']);
-
     const lr = inbound.getLastRow();
+    const todayKey = Utilities.formatDate(new Date(), OMS_CONFIG.TZ, 'yyyyMMdd');
+
+    let maxSeq = 0;
+    let foundExisting = null;
+
     if (lr >= 2) {
       const emails = inbound.getRange(2, cols['buyer-email'], lr - 1, 1).getValues();
       const cids = inbound.getRange(2, cols['customer-id'], lr - 1, 1).getValues();
 
-      for (let i = emails.length - 1; i >= 0; i--) {
-        if (this.normalizeEmail_(emails[i][0]) === email) {
-          const existing = String(cids[i][0] || '').trim();
-          if (existing) return existing;
+      for (let i = 0; i < cids.length; i++) {
+        const rowEmail = this.normalizeEmail_(emails[i][0]);
+        const cid = String(cids[i][0] || '').trim();
+
+        // 1. Check if this email already has an ID in the sheet
+        if (rowEmail === email && cid && !foundExisting) {
+          foundExisting = cid;
+        }
+
+        // 2. Track maximum sequence for TODAY's key to determine next available
+        if (cid.startsWith(OMS_CONFIG.CUSTOMER_ID_PREFIX + todayKey + '-')) {
+          const parts = cid.split('-');
+          const seq = parseInt(parts[parts.length - 1]);
+          if (!isNaN(seq) && seq > maxSeq) maxSeq = seq;
         }
       }
     }
 
-    const todayKey = Utilities.formatDate(new Date(), OMS_CONFIG.TZ, 'yyyyMMdd');
-    const props = PropertiesService.getScriptProperties();
-    const k = `CID_COUNTER_${todayKey}`;
-    const n = Number(props.getProperty(k) || '0') + 1;
-    props.setProperty(k, String(n));
+    if (foundExisting) {
+      this._cidCache[email] = foundExisting;
+      return foundExisting;
+    }
 
-    return `${OMS_CONFIG.CUSTOMER_ID_PREFIX}${todayKey}-${String(n).padStart(3, '0')}`;
+    // 3. Also account for IDs assigned in this execution but not yet written to the sheet
+    Object.values(this._cidCache).forEach(cid => {
+      if (cid.startsWith(OMS_CONFIG.CUSTOMER_ID_PREFIX + todayKey + '-')) {
+        const parts = cid.split('-');
+        const seq = parseInt(parts[parts.length - 1]);
+        if (!isNaN(seq) && seq > maxSeq) maxSeq = seq;
+      }
+    });
+
+    const n = maxSeq + 1;
+    const newCid = `${OMS_CONFIG.CUSTOMER_ID_PREFIX}${todayKey}-${String(n).padStart(3, '0')}`;
+    this._cidCache[email] = newCid;
+    return newCid;
   },
 
   /********************************
@@ -220,6 +250,64 @@ var OMS_Utils = {
 
   opsAlert_(text) {
     this.slack_(`🚨 ${OMS_CONFIG.SLACK.OPS_ALERTS_TAG}\n${text}`);
+  },
+
+  /**
+   * Send a rich Slack notification for a new order using Blocks
+   */
+  sendSlackOrderNotification(order) {
+    if (!OMS_CONFIG.SLACK.ENABLED || !OMS_CONFIG.SLACK.WEBHOOK_URL) return;
+
+    const blocks = [
+      {
+        type: "header",
+        text: { type: "plain_text", text: `📦 New Order: ${order.orderId}` }
+      },
+      {
+        type: "section",
+        fields: [
+          { type: "mrkdwn", text: `*Customer:*\n${order.buyerName}` },
+          { type: "mrkdwn", text: `*Customer ID:*\n${order.customerId}` },
+          { type: "mrkdwn", text: `*Email:*\n${order.buyerEmail}` },
+          { type: "mrkdwn", text: `*Phone:*\n${order.buyerPhone || 'N/A'}` }
+        ]
+      },
+      {
+        type: "section",
+        text: {
+          type: "mrkdwn",
+          text: `*Shipping Address:*\n${order.shipAddr1}, ${order.shipCity}, ${order.shipState} ${order.shipPostal}, ${order.shipCountry}`
+        }
+      },
+      { type: "divider" }
+    ];
+
+    // Add items
+    order.items.forEach((it, idx) => {
+      blocks.push({
+        type: "section",
+        text: {
+          type: "mrkdwn",
+          text: `*Item ${idx + 1}:* ${it.productName}\n*SKU:* \`${it.sku}\` | *Qty:* ${it.quantity} | *Price:* $${it.price}`
+        }
+      });
+    });
+
+    blocks.push({ type: "divider" });
+    blocks.push({
+      type: "section",
+      fields: [
+        { type: "mrkdwn", text: `*Sales Channel:*\n${order.salesChannel || 'SamCart'}` },
+        { type: "mrkdwn", text: `*Total Amount:*\n$${order.totalAmount}` }
+      ]
+    });
+
+    UrlFetchApp.fetch(OMS_CONFIG.SLACK.WEBHOOK_URL, {
+      method: 'post',
+      contentType: 'application/json',
+      payload: JSON.stringify({ blocks }),
+      muteHttpExceptions: true,
+    });
   },
 
   getOrCreateLabel_(name) {
