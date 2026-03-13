@@ -360,7 +360,7 @@ This structure ensures clean sales data, reliable shipment tracking, and clear o
 
 ## Appendix: Implementation Notes
 
-The system originally used `Master_OMS_Table` as its canonical view. This has been unified into `Master_OMS_View` to align with operational documentation. The primary refresh logic is handled by `refreshMasterOmsView()` in `Master.gs`.
+The system originally used `Master_OMS_Table` as its canonical view. This has been unified into `Master_OMS_View` to align with operational documentation. The primary refresh logic is handled by `refreshMasterOmsView()` in `Master OMS View.gs`.
 
 # Automation Process & Workflow Report
 
