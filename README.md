@@ -357,3 +357,48 @@ The OMS separates responsibilities into three layers:
 **Master_OMS_View** (Operations + Analytics)
 
 This structure ensures clean sales data, reliable shipment tracking, and clear operational visibility.
+
+# Automation Process & Workflow Report
+
+The G·GRIP OMS is designed for "zero-touch" order ingestion and highly automated logistics tracking. Below is the technical and operational report of the full automation workflow.
+
+## 1. Sales Ingestion (Zero-Touch)
+The system monitors specific Gmail labels for three primary sales channels: **SamCart**, **Shopify**, and **Imweb**.
+- **Polling:** Script functions (`inbound_runSamCart`, etc.) are triggered (manually or via time-based triggers) to scan "To Process" labels.
+- **Parsing:** The system uses robust regex and text-cleaning logic (`ultraCleanText_`) to extract order IDs, customer details, shipping addresses, and product specs from email bodies.
+- **Deduplication:** Uses `system-gmail-id` and `oms-order-item-id` to prevent duplicate entries if an email is re-processed.
+- **Address Normalization:** A global address parser (`parseGlobalAddress`) standardizes addresses across US, UK, EU, KR, and JP formats.
+
+## 2. Identity & Privacy Layer
+- **Customer ID Generation:** Automatically assigns a unique ID (`CYYYYMMDD-###`) to new customers while recognizing returning customers via email lookup.
+- **Privacy Hashing:** Generates a SHA-256 `buyer-email-hash` for secure customer tracking across systems without exposing PII in every view.
+- **Canonical IDs:** Maps disparate source system IDs into a unified OMS format (`source-system:order-id:item-id`).
+
+## 3. Warehouse Fulfillment & Outbound Stubs
+- **Automatic Stub Creation:** As soon as an order is ingested into `Inbound_Orders`, a corresponding "stub" is created in `Outbound_Logistics`.
+- **Packaging Defaults:** The system automatically calculates package weight and dimensions based on the product (e.g., standard club vs. club-with-stand).
+- **S/N Allocation:** Warehouse staff allocate serial numbers in `Inbound_Orders`.
+- **S/N Verification:** When a serial number is scanned in the warehouse (`Outbound_Logistics`), the system automatically verifies it against the allocation and flags `MISMATCH` or `OK`.
+
+## 4. Logistics & Tracking Automation
+- **Status Progression:** The `outbound-status` updates automatically as dates are entered:
+  - `hub-received-date` → `HUB_RECEIVED`
+  - `us-ship-date` → `US_SHIPPED`
+  - `delivered-date` → `DELIVERED`
+- **Linkification:** Tracking numbers for LOGEN, FedEx, UPS, USPS, and DHL are automatically converted into clickable rich-text links.
+- **Stage Timeline:** A human-readable history (`stage-timeline`) is deterministically rebuilt every time a logistics milestone is reached.
+
+## 5. Automated Communication
+- **Customer Notifications:** Once an international tracking number is added, the system automatically sends a "Final Delivery" email to the customer using a branded HTML template.
+- **Slack Alerts:** Real-time notifications are sent to Slack for:
+  - New order arrivals (with full item breakdown).
+  - Operational errors (S/N mismatches, parsing failures).
+  - Hub backlogs or shipping exceptions.
+
+## 6. Real-Time Analytics & Dashboard
+- **Master Table Join:** The `Master_OMS_Table` automatically joins Inbound (Sales) and Outbound (Logistics) data using the `oms-order-item-id` as the primary key.
+- **Dynamic Metrics:** The `Master_OMS_Dashboard` uses dynamic formulas to calculate:
+  - **Logistics Velocity:** Average days for each shipping leg (Purchase → Hub → US → Door).
+  - **Operational Health:** Hub backlog counts, S/N mismatch rates, and reshipment percentages.
+  - **Financials:** LTV and Lost Revenue (refunds) filtered by the selected dashboard date range.
+- **Dynamic Charting:** Inbound velocity and Outbound status charts update instantly based on the "Start Date" and "End Date" selected on the dashboard.

@@ -700,19 +700,23 @@ function putMetric_(sheet, row, label, formula, notes) {
  */
 function buildDashboardData_(sheet, mstCol) {
   sheet.clear();
-  const IN = OMS_CONFIG.TABS.INBOUND;
-  const MST = OMS_CONFIG.TABS.MASTER_TABLE;
+  const MST_DASH = OMS_CONFIG.TABS.DASHBOARD;
 
-  // 1. Inbound Items by Day (Last 30 Days)
-  sheet.getRange('A1').setValue('Inbound Trend (Last 30 Days)');
+  // 1. Inbound Items by Day (Dynamic Range)
+  sheet.getRange('A1').setValue('Inbound Trend (In Range)');
   sheet.getRange('A2').setValue('Date');
   sheet.getRange('B2').setValue('Items');
-  sheet.getRange('A3').setFormula('=ARRAYFORMULA(TODAY()-30+ROW(A1:A31))');
-  sheet.getRange('B3').setFormula(`=ARRAYFORMULA(COUNTIFS(${mstCol('purchase-date')}, A3:A33))`);
 
-  // 2. Outbound Status Distribution
-  sheet.getRange('D1').setValue('Current Outbound Status');
-  sheet.getRange('D2').setFormula(`=QUERY(${mstCol('outbound-status')}, "SELECT Col1, COUNT(Col1) WHERE Col1 IS NOT NULL GROUP BY Col1 LABEL COUNT(Col1) 'Count'", 0)`);
+  // Dynamic sequence of dates between Start (B3) and End (D3) on Dashboard
+  sheet.getRange('A3').setFormula(`=SEQUENCE('${MST_DASH}'!$D$3 - '${MST_DASH}'!$B$3 + 1, 1, '${MST_DASH}'!$B$3)`);
+  sheet.getRange('B3').setFormula(`=ARRAYFORMULA(COUNTIFS(${mstCol('purchase-date')}, A3:INDEX(A:A, MATCH(9^9, A:A))))`);
+
+  // 2. Outbound Status Distribution (Filtered by Range)
+  sheet.getRange('D1').setValue('Outbound Status (In Range)');
+  const statusCol = mstCol('outbound-status');
+  const dateCol = mstCol('purchase-date');
+  const query = `=QUERY({${statusCol}, ${dateCol}}, "SELECT Col1, COUNT(Col1) WHERE Col1 IS NOT NULL AND Col2 >= DATE '"&TEXT('${MST_DASH}'!$B$3,"yyyy-mm-dd")&"' AND Col2 <= DATE '"&TEXT('${MST_DASH}'!$D$3,"yyyy-mm-dd")&"' GROUP BY Col1 LABEL COUNT(Col1) 'Count'", 0)`;
+  sheet.getRange('D2').setFormula(query);
 }
 
 /**
@@ -726,24 +730,29 @@ function addDashboardCharts_(sheet, dataSheet) {
   // 1. Inbound Line Chart
   const inboundChart = sheet.newChart()
     .setChartType(Charts.ChartType.LINE)
-    .addRange(dataSheet.getRange('A2:B33'))
+    .addRange(dataSheet.getRange('A2:B102')) // support up to 100 days
     .setPosition(24, 1, 0, 0)
-    .setOption('title', 'Inbound Velocity (Last 30 Days)')
+    .setOption('title', 'Inbound Velocity')
     .setOption('legend', { position: 'none' })
     .setOption('vAxis', { title: 'Items' })
     .setOption('hAxis', { title: 'Date' })
     .setOption('width', 600)
     .setOption('height', 300)
+    .setOption('backgroundColor.stroke', 'none')
+    .setOption('backgroundColor.strokeWidth', 0)
     .build();
 
   // 2. Status Pie Chart
+  // Repositioned to start halfway through column C (Column 3, offset 210)
   const statusChart = sheet.newChart()
     .setChartType(Charts.ChartType.PIE)
     .addRange(dataSheet.getRange('D2:E10'))
-    .setPosition(24, 4, 0, 0)
+    .setPosition(24, 3, 210, 0)
     .setOption('title', 'Outbound Pipeline Status')
     .setOption('width', 400)
     .setOption('height', 300)
+    .setOption('backgroundColor.stroke', 'none')
+    .setOption('backgroundColor.strokeWidth', 0)
     .build();
 
   sheet.insertChart(inboundChart);
